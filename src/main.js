@@ -1,0 +1,42 @@
+import './styles/main.css';
+
+import './modules/vendor-globals.js';
+
+import './modules/core-data.js';
+import './modules/login.js';
+import './modules/nav.js';
+import './modules/buscador-ot.js';
+import './modules/form-helpers.js';
+import './modules/regiones-comunas.js';
+import './modules/form-productos.js';
+import './modules/form-adicionales-garantia.js';
+import './modules/form-tecnicos-extra.js';
+import './modules/registro-adjuntos.js';
+import './modules/dashboard-kpis.js';
+import './modules/unidad-patente-selector.js';
+import './modules/mantenciones-vehiculos.js';
+import './modules/estado-flota.js';
+import './modules/flota-regla-detalle-modal.js';
+import './modules/flota-regla-modal.js';
+import './modules/reportes-unidad.js';
+import './modules/periodo-helpers.js';
+import './modules/adjuntos-pendientes.js';
+import './modules/listas-admin.js';
+import './modules/personas.js';
+import './modules/evaluaciones.js';
+import './modules/evaluaciones-extra.js';
+import './modules/evaluaciones-pdf.js';
+import './modules/reporte-instalacion-catalogos.js';
+import './modules/reporte-instalacion-firma.js';
+import './modules/reporte-instalacion-selector-ot.js';
+import './modules/reporte-instalacion-pdf.js';
+import './modules/reporte-instalacion-whatsapp.js';
+import './modules/escaner-documentos.js';
+import './modules/escaner-edicion.js';
+import './modules/escaner-revision.js';
+import './modules/selector-foto-galeria.js';
+import './modules/exportacion-excel.js';
+import './modules/color-sistema.js';
+import './modules/bootstrap.js';
+
+import './modules/expose-globals.js';

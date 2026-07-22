@@ -1,0 +1,826 @@
+import { dbUpsertRegistro, dbUpsertUnidad, sb, sbReady } from './bootstrap.js';
+import { __set_charts, __set_registros, __set_unidades, charts, currentTab, lists, otContext, registros, rgVals, session, unidades } from './core-data.js';
+import { renderDash, renderUniTable } from './dashboard-kpis.js';
+import { dbUpsertEvalFotosOT, ensureEvalFotosOT, esMiOT, escapeHtml, evalFotosOT, isAdminUser } from './evaluaciones.js';
+import { renderSegResenas } from './evaluaciones-extra.js';
+import { __set_extraRows, extraRows, extrasValidos, renderExtraRows } from './form-adicionales-garantia.js';
+import { actualizarCamposGiftcard, calcDur, g, selRg, toggleAnclaje } from './form-helpers.js';
+import { __set_productoRows, productoRows, productosValidos, renderProductoRows } from './form-productos.js';
+import { __set_fotografos, __set_materialRows, __set_tecnicosExtra, fotografos, fotografosValidos, materialRows, materialesValidos, renderFotografosRows, renderMaterialRows, renderTecnicosExtra, resetFotografos, resetMaterialRows, tecnicosExtra, tecnicosExtraValidos } from './form-tecnicos-extra.js';
+import { verDetalleRegistro } from './periodo-helpers.js';
+import { populateComunasForRegion } from './regiones-comunas.js';
+import { currentUserName } from './reportes-unidad.js';
+import { comprimirImagenSiHaceFalta, limpiarPreviewArchivo } from './selector-foto-galeria.js';
+import { uniregSelected } from './unidad-patente-selector.js';
+
+/* ===== Adjuntos del registro (fotos y PDFs) ===== */
+export let regAdjuntosPendientes=[];
+/* Adjuntos que ya se subieron a Supabase (por ejemplo, al apretar "DE UNA!"
+   antes de guardar el registro). Se guardan acá para que, si después se
+   aprieta "Guardar registro", esos archivos no se vuelvan a subir ni se
+   pierdan — simplemente se incluyen tal cual en el registro final. */
+export let regAdjuntosYaSubidos=[];
+export function handleRegAdjuntosSelected(fileList){
+  [...fileList].forEach(f=>regAdjuntosPendientes.push(f));
+  renderRegAdjuntosPendientes();
+}
+export function renderRegAdjuntosPendientes(){
+  const el=g('reg-adjuntos-pending');
+  if(!el)return;
+  if(!regAdjuntosPendientes.length){el.innerHTML='';return;}
+  el.innerHTML='<div class="ot-pending-grid">'+regAdjuntosPendientes.map((f,i)=>{
+    const isPdf=f.type==='application/pdf';
+    const inner=isPdf?`<div class="ot-pending-file" style="background:#7A1F1F"><span class="ext">PDF</span><span class="fname">${escapeHtml(f.name)}</span></div>`:`<img src="${URL.createObjectURL(f)}">`;
+    return `<div class="ot-pending-card">${inner}<button class="rm" onclick="removeRegAdjuntoPendiente(${i})" title="Quitar"></button></div>`;
+  }).join('')+'</div>';
+}
+export function removeRegAdjuntoPendiente(i){regAdjuntosPendientes.splice(i,1);renderRegAdjuntosPendientes();}
+export async function subirRegAdjuntosPendientes(ot){
+  if(!regAdjuntosPendientes.length)return[];
+  if(!sbReady())return[];
+  const by=currentUserName();
+  const subidos=[];
+  const fallidos=[];
+  for(let file of regAdjuntosPendientes){
+    if(file.size>15*1024*1024){fallidos.push(`${file.name} (supera 15MB)`);continue;}
+    file=await comprimirImagenSiHaceFalta(file);
+    const id=Date.now()+'_'+Math.random().toString(36).slice(2,7);
+    const path='OT_'+String(ot).replace(/[^a-zA-Z0-9]/g,'_')+'/'+id+'_'+file.name;
+    try{
+      const{error}=await sb.storage.from('registro-adjuntos').upload(path,file);
+      if(error)throw error;
+      subidos.push({id,nombreArchivo:file.name,fecha:new Date().toISOString().slice(0,10),mimeType:file.type,storagePath:path,uploadedBy:by});
+    }catch(e){
+      console.error('Error subiendo adjunto:',e);
+      const detalle=(e&&(e.message||e.error_description||e.hint||e.statusCode))||'Error desconocido';
+      fallidos.push(`${file.name} (${detalle})`);
+    }
+  }
+  regAdjuntosPendientes=[];
+  renderRegAdjuntosPendientes();
+  if(fallidos.length){
+    alert('No se pudieron subir estos archivos adjuntos:\n\n'+fallidos.join('\n')+
+      '\n\nEl resto del registro se guardó igual. Revisa en Supabase que exista el bucket "registro-adjuntos" (Storage) y que tenga permisos de subida (policy INSERT) para usuarios autenticados/anónimos.');
+  }
+  return subidos;
+}
+export async function forzarDescarga(url,nombre){
+  try{
+    const res=await fetch(url);
+    if(!res.ok)throw new Error('No se pudo obtener el archivo');
+    const blob=await res.blob();
+    const blobUrl=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=blobUrl;
+    a.download=nombre||'archivo';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>URL.revokeObjectURL(blobUrl),4000);
+  }catch(e){
+    console.error('Error al descargar:',e);
+    alert('No se pudo descargar el archivo. Se abrirá en una pestaña nueva.');
+    window.open(url,'_blank');
+  }
+}
+export function adjuntoUrl(a){
+  if(a.storagePath&&sbReady()){try{return sb.storage.from('registro-adjuntos').getPublicUrl(a.storagePath).data.publicUrl;}catch(e){}}
+  return'';
+}
+/* Acorta una URL larga (ej: el link público de Supabase) usando la API
+   gratuita de is.gd, para que en WhatsApp se vea corto y prolijo en vez
+   del link enorme. No requiere API key. Si falla por algún motivo (sin
+   internet, servicio caído, etc.) se devuelve la URL original tal cual,
+   para no perder el link. */
+export async function acortarUrl(url){
+  if(!url)return url;
+  try{
+    const resp=await fetch('https://is.gd/create.php?format=simple&url='+encodeURIComponent(url));
+    if(!resp.ok)throw new Error('is.gd status '+resp.status);
+    const corta=(await resp.text()).trim();
+    if(corta&&corta.startsWith('http'))return corta;
+    throw new Error('Respuesta inesperada de is.gd: '+corta);
+  }catch(e){
+    console.error('No se pudo acortar el link, se usará el original:',e);
+    return url;
+  }
+}
+
+export let problemaRows=[{problema:'',solucion:'',quesol:''}];
+export function probOpts(arr,sel){return (arr||[]).map(v=>`<option value="${escapeHtml(v)}" ${v===sel?'selected':''}>${escapeHtml(v)}</option>`).join('');}
+export function renderProblemasRows(){
+  const cont=g('problemas-rows');
+  if(!cont)return;
+  const multi=problemaRows.length>1;
+  cont.innerHTML=problemaRows.map((row,i)=>{
+    const num=multi?` ${i+1}`:'';
+    return `
+    <div class="prob-row">
+      <div class="field"><label>Tipo de problema${num}</label><select onchange="setProbRow(${i},'problema',this.value)">${probOpts(lists.problemas,row.problema)}</select></div>
+      <div class="field"><label>Solución${num}</label><select onchange="setProbRow(${i},'solucion',this.value)">${probOpts(lists.soluciones,row.solucion)}</select></div>
+      <div class="field"><label>¿Qué se solucionó?${num}</label><select onchange="setProbRow(${i},'quesol',this.value)">${probOpts(lists.queSoluciono,row.quesol)}</select></div>
+      <button type="button" class="btn-del prob-del" title="Quitar problema" onclick="removeProbRow(${i})" style="${multi?'':'visibility:hidden'}"><i class="ti ti-trash" aria-hidden="true"></i></button>
+    </div>`;
+  }).join('')+`<button type="button" class="btn-sec prob-add" onclick="addProbRow()" title="Agregar otro problema"><i class="ti ti-plus" aria-hidden="true"></i> Agregar otro problema</button>`;
+  // Sincroniza el modelo con los valores realmente renderizados (por defaults)
+  [...cont.querySelectorAll('.prob-row')].forEach((rowEl,i)=>{
+    const sels=rowEl.querySelectorAll('select');
+    if(sels[0])problemaRows[i].problema=sels[0].value;
+    if(sels[1])problemaRows[i].solucion=sels[1].value;
+    if(sels[2])problemaRows[i].quesol=sels[2].value;
+  });
+}
+export function setProbRow(i,key,val){if(problemaRows[i])problemaRows[i][key]=val;scheduleRegDraftSave();}
+export function addProbRow(){problemaRows.push({problema:'',solucion:'',quesol:''});renderProblemasRows();scheduleRegDraftSave();}
+export function removeProbRow(i){problemaRows.splice(i,1);if(!problemaRows.length)problemaRows.push({problema:'',solucion:'',quesol:''});renderProblemasRows();scheduleRegDraftSave();}
+export function resetProblemasRows(){problemaRows=[{problema:'',solucion:'',quesol:''}];renderProblemasRows();}
+/* Concatena una columna: 1 fila -> valor plano; varias -> "1- A / 2- B" */
+export function joinProbField(key){
+  const vals=problemaRows.map(r=>r[key]).filter(v=>v&&String(v).trim());
+  if(vals.length<=1)return vals[0]||'';
+  return vals.map((v,i)=>`${i+1}- ${v}`).join(' / ');
+}
+export async function guardar(){
+  const ot=g('f-ot').value;
+  if(!ot||!ot.trim()){alert('Debes ingresar el N° de OT antes de guardar.');return;}
+  if(!sbReady())return;
+  const hi=g('f-hinicio').value, hs=g('f-hsalida').value;
+  let durMin=null;
+  if(hi&&hs){const[hh,mm]=hi.split(':').map(Number);const[sh,sm]=hs.split(':').map(Number);durMin=(sh*60+sm)-(hh*60+mm);}
+  const productos=productosValidos().map(p=>({tipo:p.tipo,cantidad:parseInt(p.cantidad)||0,codigo:(p.codigo||'').trim()}));
+  const tipoCortina=productos.map(p=>p.tipo).join(', ');
+  const cantidad=productos.reduce((s,p)=>s+p.cantidad,0);
+  const adjuntosNuevos=await subirRegAdjuntosPendientes(ot);
+  const adjuntos=[...regAdjuntosYaSubidos,...adjuntosNuevos];
+  const extras=extrasValidos().map(e=>({adicional:e.adicional,cantidad:parseInt(e.cantidad)||0,tipoGar:e.tipoGar}));
+  const adicional=extras.map(e=>e.adicional).filter(Boolean).join(', ');
+  const tipoGar=extras.map(e=>e.tipoGar).filter(Boolean).join(', ');
+  const materiales=materialesValidos();
+  const r={
+    id:Date.now(),fecha:g('f-fecha').value,mes:g('f-mes').value,
+    tipo:rgVals['rg-tipo']||'',ot,cliente:g('f-cliente').value,
+    tec1:g('f-tec1').value,tec2:g('f-tec2').value,tec3:g('f-tec3').value,tec4:g('f-tec4').value,
+    tecnicosExtra:tecnicosExtraValidos(),
+    hinicio:hi,hsalida:hs,durMin,traslado:g('f-traslado').value,
+    tipoCortina,cantidad,productos,
+    adicional,tipoGar,extras,
+    nivelDif:rgVals['rg-niveldif']||'',
+    materiales,material:materiales.join(', '),
+    anclaje:rgVals['rg-anclaje']||'',
+    ubicacion:g('f-ubic').value,codMotor:g('f-codmotor').value,
+    calle:g('f-calle').value,numero:g('f-numero').value,
+    region:g('f-region').value,comuna:g('f-comuna').value,
+    google:rgVals['rg-google']||'No',video:rgVals['rg-video']||'No',danos:rgVals['rg-danos']||'No',
+    comentarioSeguimiento:g('f-seg-comentario').value,
+    problema:joinProbField('problema'),solucion:joinProbField('solucion'),queSol:joinProbField('quesol'),
+    comentario:g('f-comentario').value,adjuntos,
+    fotografos:fotografosValidos(),
+    giftcard:rgVals['rg-giftcard']||'No',
+    giftcardCodigo:(g('f-giftcard-codigo')?.value||'').trim(),
+    giftcardDescuento:g('f-giftcard-desc')?.value?parseInt(g('f-giftcard-desc').value)||0:null,
+    creadoPor:currentUserName()
+  };
+  registros.push(r);
+  const ok=await dbUpsertRegistro(r);
+  if(!ok){
+    __set_registros(registros.filter(x=>x.id!==r.id));
+    return;
+  }
+  /* Si en esta OT nueva se marcó "Sí" en Reseña Google, quiere decir que
+     al cliente ya se le avisó que debe dejar su reseña (todavía no que
+     la dejó). Ese aviso cuenta como el primer contacto de seguimiento,
+     así que se rellena automáticamente el Seguimiento 1 de su ficha con
+     la fecha de la OT y el comentario que se dejó en esta misma sección.
+     Los Seguimientos 2 y 3 quedan vacíos para que el admin los complete
+     a mano cuando haga el seguimiento real de la reseña. Esto solo pasa
+     al crear la OT (acá en guardar()), nunca al editarla después.
+     Solo se rellena si el Seguimiento 1 de esa OT todavía está vacío:
+     una misma OT puede tener más de una visita registrada (ej. una
+     garantía posterior), y no queremos pisar un seguimiento que el
+     admin ya haya completado a mano en una visita anterior. */
+  if(r.google==='Si'){
+    const m=ensureEvalFotosOT(ot);
+    if(!m.seg1&&!m.seg1c){
+      m.seg1=r.fecha||'';
+      m.seg1c=r.comentarioSeguimiento||'';
+      await dbUpsertEvalFotosOT(ot);
+    }
+  }
+  if(currentTab==='seg_resenas')renderSegResenas();
+  showToast('toast-reg');
+  mostrarAvisoGuardadoOk(r.ot);
+  clearRegDraft();
+  blankRegForm();
+}
+export function formatFechaCorta(fecha){
+  const[y,m,d]=fecha.split('-');
+  return `${d}/${m}/${(y||'').slice(2)}`;
+}
+
+/* ---------- Borrador del formulario "OT nueva" ----------
+   Guarda en localStorage lo que la persona va escribiendo, para que si
+   se recarga la página, se cae la conexión, se actualiza el sistema, o
+   cierra la pestaña por error ANTES de guardar, no pierda el trabajo ya
+   hecho.
+
+   Solo existe UN borrador activo a la vez POR OPERADOR (el que está en el
+   formulario ahora mismo) — no hay varios formularios "en pausa" en paralelo
+   para una misma persona.
+
+   IMPORTANTE: la clave incluye el código del operador que inició sesión
+   (ver regDraftKey()). Esto es a propósito: si no se separara por operador,
+   el borrador que dejó a medio llenar una persona podría aparecer en la
+   pantalla de otra persona que inicia sesión después en el mismo equipo —
+   cada operador debe ver únicamente lo que él mismo escribió.
+
+   El borrador se borra automáticamente en cuanto esa OT se guarda con éxito. */
+export const REG_DRAFT_KEY_BASE='rolzzo_reg_draft';
+/* Devuelve la clave de localStorage del borrador para el operador con sesión
+   activa. Si por algún motivo no hay sesión (no debería pasar dentro del
+   formulario), se usa una clave separada para no mezclarla nunca con la de
+   un operador real. */
+export function regDraftKey(){
+  const codigo=(session&&session.codigo)?session.codigo:'sin-sesion';
+  return REG_DRAFT_KEY_BASE+'_'+codigo;
+}
+export const REG_DRAFT_FIELD_IDS=['f-fecha','f-mes','f-ot','f-cliente','f-tec1','f-tec2','f-tec3','f-tec4',
+  'f-hinicio','f-hsalida','f-traslado','f-ubic','f-codmotor',
+  'f-calle','f-numero','f-region','f-comuna','f-seg-comentario','f-comentario',
+  'f-giftcard-codigo','f-giftcard-desc'];
+export let regDraftSuspend=false;
+export function captureRegDraft(){
+  const fields={};
+  REG_DRAFT_FIELD_IDS.forEach(id=>{const el=g(id);if(el)fields[id]=el.value;});
+  return {fields,rgVals:{...rgVals},productoRows,extraRows,tecnicosExtra,problemaRows,materialRows,fotografos,savedAt:new Date().toISOString()};
+}
+export function regDraftIsEmpty(d){
+  if(!d)return true;
+  const hasField=Object.values(d.fields||{}).some(v=>v&&String(v).trim());
+  const hasProd=(d.productoRows||[]).some(p=>p.tipo&&p.tipo.trim());
+  const hasProb=(d.problemaRows||[]).some(p=>p.problema&&p.problema.trim());
+  const hasExtra=(d.extraRows||[]).some(e=>e.adicional&&e.adicional.trim());
+  const hasTecExtra=(d.tecnicosExtra||[]).some(t=>t&&t.trim());
+  const hasMaterial=(d.materialRows||[]).some(m=>m&&m.trim());
+  const hasFotografos=(d.fotografos||[]).length>0;
+  return !hasField&&!hasProd&&!hasProb&&!hasExtra&&!hasTecExtra&&!hasMaterial&&!hasFotografos;
+}
+export function saveRegDraft(){
+  if(regDraftSuspend)return;
+  try{
+    const draft=captureRegDraft();
+    if(regDraftIsEmpty(draft)){localStorage.removeItem(regDraftKey());return;}
+    localStorage.setItem(regDraftKey(),JSON.stringify(draft));
+  }catch(e){}
+}
+export function clearRegDraft(){
+  try{localStorage.removeItem(regDraftKey());}catch(e){}
+}
+/* Aplica un objeto de borrador al formulario visible (sin tocarlo si viene vacío). */
+export function applyRegDraftToForm(draft){
+  regDraftSuspend=true;
+  try{
+    if(draft.rgVals){
+      Object.keys(draft.rgVals).forEach(k=>{
+        rgVals[k]=draft.rgVals[k];
+        const grp=g(k);
+        if(grp){
+          grp.querySelectorAll('.ro').forEach(x=>{
+            const oc=x.getAttribute('onclick')||'';
+            if(k==='rg-anclaje'){
+              /* rg-anclaje permite multi-selección (toggleAnclaje), no un solo valor */
+              const m=oc.match(/toggleAnclaje\('([^']*)'\)/);
+              const btnVal=m?m[1]:null;
+              const vals=(draft.rgVals[k]||'').split(',').filter(Boolean);
+              x.classList.toggle('sel',btnVal&&vals.includes(btnVal));
+              return;
+            }
+            const m=oc.match(/selRg\([^,]+,[^,]+,'([^']*)'\)/);
+            const btnVal=m?m[1]:null;
+            x.classList.toggle('sel',btnVal===draft.rgVals[k]);
+          });
+        }
+      });
+    }
+    __set_productoRows((draft.productoRows&&draft.productoRows.length)?draft.productoRows:[{tipo:'',cantidad:'',codigo:''}]);
+    renderProductoRows();
+    __set_extraRows((draft.extraRows&&draft.extraRows.length)?draft.extraRows:[{adicional:'',tipoGar:''}]);
+    renderExtraRows();
+    __set_tecnicosExtra(draft.tecnicosExtra||[]);
+    renderTecnicosExtra();
+    __set_materialRows((draft.materialRows&&draft.materialRows.length)?draft.materialRows:['']);
+    renderMaterialRows();
+    __set_fotografos(draft.fotografos||[]);
+    problemaRows=(draft.problemaRows&&draft.problemaRows.length)?draft.problemaRows:[{problema:'',solucion:'',quesol:''}];
+    renderProblemasRows();
+    REG_DRAFT_FIELD_IDS.forEach(id=>{
+      const el=g(id);
+      if(el)el.value=(draft.fields&&draft.fields[id])||'';
+    });
+    renderFotografosRows();
+    actualizarCamposGiftcard();
+    if(g('f-region').value)populateComunasForRegion('f-region','f-comuna',draft.fields&&draft.fields['f-comuna']);
+    else populateComunasForRegion('f-region','f-comuna');
+    calcDur();
+  }finally{
+    regDraftSuspend=false;
+  }
+}
+/* Limpia el formulario a un estado en blanco, sin guardar nada. */
+export function blankRegForm(){
+  rgVals['rg-tipo']='Instalación';rgVals['rg-niveldif']='MEDIO';rgVals['rg-anclaje']='TECHO';
+  rgVals['rg-google']='No';rgVals['rg-video']='No';rgVals['rg-danos']='No';rgVals['rg-giftcard']='No';
+  applyRegDraftToForm({fields:{},rgVals:{...rgVals}});
+  resetMaterialRows();
+  resetFotografos();
+  actualizarCamposGiftcard();
+  g('dur-display').textContent='';
+  regAdjuntosPendientes=[];
+  regAdjuntosYaSubidos=[];
+  renderRegAdjuntosPendientes();
+}
+export function otDraftLabel(d){
+  const ot=(d.fields&&d.fields['f-ot'])||'';
+  const cliente=(d.fields&&d.fields['f-cliente'])||'';
+  if(ot&&cliente)return`OT ${ot} · ${cliente}`;
+  if(ot)return`OT ${ot}`;
+  if(cliente)return cliente;
+  return'un formulario sin OT ni cliente';
+}
+/* Se llama justo después de iniciar sesión (o al recargar/reabrir el
+   sistema): si hay un borrador guardado de una OT que quedó sin terminar
+   (por ejemplo, por un cierre inesperado, una actualización del sistema,
+   o recargar la página sin querer), se muestra un aviso claro preguntando
+   si se quiere retomar esa OT o empezar una nueva. No aparece solo por
+   cambiar de pestaña dentro del sistema — solo al reabrir/recargar. */
+export function restoreRegDraft(){
+  let draft=null;
+  try{draft=JSON.parse(localStorage.getItem(regDraftKey())||'null');}catch(e){}
+  if(!draft||regDraftIsEmpty(draft))return;
+  pendingRegDraft=draft;
+  abrirModalOtPendiente(draft);
+}
+export let pendingRegDraft=null;
+export function abrirModalOtPendiente(draft){
+  const label=otDraftLabel(draft);
+  const body=g('modal-ot-pendiente-body');
+  if(body)body.textContent=`Quedó ${label} sin terminar. ¿Quieres retomarla donde la dejaste, o prefieres empezar una OT nueva?`;
+  const modal=g('modal-ot-pendiente');
+  if(modal)modal.style.display='flex';
+}
+export function cerrarModalOtPendiente(){
+  const modal=g('modal-ot-pendiente');
+  if(modal)modal.style.display='none';
+}
+/* Botón "Retomar" del modal: repone el borrador guardado en el formulario. */
+export function retomarOtPendiente(){
+  if(pendingRegDraft)applyRegDraftToForm(pendingRegDraft);
+  pendingRegDraft=null;
+  cerrarModalOtPendiente();
+}
+/* Botón "Nueva OT" del modal: descarta el borrador pendiente y deja el
+   formulario en blanco. */
+export function descartarOtPendiente(){
+  clearRegDraft();
+  blankRegForm();
+  pendingRegDraft=null;
+  cerrarModalOtPendiente();
+}
+/* Autoguardado: cualquier tecleo o cambio dentro del formulario de OT nueva
+   dispara el guardado del borrador (con un pequeño retraso para no saturar). */
+export let regDraftTimer=null;
+export function scheduleRegDraftSave(){
+  clearTimeout(regDraftTimer);
+  regDraftTimer=setTimeout(saveRegDraft,400);
+}
+document.addEventListener('input',e=>{
+  const el=e.target;
+  if(el.id&&REG_DRAFT_FIELD_IDS.includes(el.id))scheduleRegDraftSave();
+});
+document.addEventListener('change',e=>{
+  const el=e.target;
+  if(el.id&&REG_DRAFT_FIELD_IDS.includes(el.id))scheduleRegDraftSave();
+});
+
+/* Arma el texto del resumen de WhatsApp ("DE UNA!") a partir de un objeto
+   de registro con la MISMA forma que arma guardar() (r.ot, r.tec1, r.productos,
+   r.extras, r.adjuntos, etc). Esto permite generar exactamente el mismo
+   resumen y los mismos links de descarga tanto desde el formulario "OT nueva"
+   (antes de guardar) como desde el detalle de una OT ya guardada (por si el
+   botón original falló al copiar o el técnico necesita reenviarlo). */
+export async function armarTextoResumenWhatsapp(r){
+  const ot=r.ot||'—';
+  const hinicio=r.hinicio||'—';
+  const hsalida=r.hsalida||'—';
+  const fecha=r.fecha?formatFechaCorta(r.fecha):'—';
+  const cliente=r.cliente||'—';
+  const tipo=r.tipo||'';
+  const cobrar=tipo==='Garantía'?'No':'Si';
+  const instaladoresLista=[r.tec1,r.tec2,r.tec3,r.tec4,...(r.tecnicosExtra||[])].filter(Boolean);
+  const instaladores=formatListaWhatsapp(instaladoresLista);
+  const prodsValidos=(r.productos&&r.productos.length)?r.productos:[];
+  const telasLista=prodsValidos.map(p=>{
+    const cod=(p.codigo||'').trim();
+    return `${p.tipo}${cod?' - Cód: '+cod:''}${p.cantidad?' ('+p.cantidad+' un.)':''}`;
+  });
+  const telas=formatListaWhatsapp(telasLista);
+  const video=r.video==='Si'?(instaladoresLista[0]||'Sí').trim():'No';
+  const google=r.google==='Si'?'Enviado':'No';
+  const extras=(r.extras&&r.extras.length)?r.extras:[];
+  const adicionalUpper=extras.map(e=>e.adicional).filter(Boolean).join(', ').toUpperCase();
+  const router=adicionalUpper.includes('HUB')?'Sí':'No';
+  const extrasLista=extras.map(e=>[e.adicional,e.cantidad?('x'+e.cantidad):'',e.tipoGar].filter(Boolean).join(' ')).filter(Boolean);
+  const extrasDetalle=formatListaWhatsapp(extrasLista);
+  const probVals=(r.problema?String(r.problema).split('\n'):[]).filter(v=>v&&!v.toUpperCase().includes('NINGUNO')&&!v.toUpperCase().includes('NO APLICA'));
+  const problemas=formatListaWhatsapp(probVals);
+  const comuna=r.comuna||'—';
+  const nota=r.comentario||'';
+  const giftcard=r.giftcard==='Si'
+    ?`Sí${r.giftcardCodigo?' - Cód: '+r.giftcardCodigo:''}${(r.giftcardDescuento||r.giftcardDescuento===0)?' - '+r.giftcardDescuento+'% dcto.':''}`
+    :'No';
+  const adjuntosSubidos=r.adjuntos||[];
+  const urlsCortas=await Promise.all(adjuntosSubidos.map(a=>acortarUrl(adjuntoUrl(a))));
+  const adjuntosLista=adjuntosSubidos.map((a,i)=>{
+    const url=urlsCortas[i];
+    return url?`Archivo ${i+1}: ${url}`:`Archivo ${i+1}`;
+  });
+  const adjuntosTxt=formatListaWhatsapp(adjuntosLista);
+
+  return `*** Hora de llegada ${hinicio} ***
+
+1.💸 Se puede cobrar? ${cobrar}
+2.📆 Fecha: ${fecha}
+3.😎 Cliente: ${cliente}
+4.🖊️ OT Cliente: ${ot}
+5.⚠️ Estado: Culminada
+6.🛠️ Instaladores: ${instaladores}
+7.📜 Telas: ${telas}
+8.🧰 Adicional / Garantía: ${extrasDetalle}
+9.📷 Fotos y video: ${video}
+10.💻 Link de google: ${google}
+11.👉🏼Se deja router: ${router}
+12.🪟Cambio de manilla: No
+13.🔴Problemas detectados: ${problemas}
+14.📍Comuna: ${comuna}
+15.🎁 Giftcard: ${giftcard}
+16.📎 Documentos adjuntos: ${adjuntosTxt}
+
+***Hora de salida: ${hsalida}***
+
+Nota: ${nota}`;
+}
+/* Botón "DE UNA!" del formulario "OT nueva": arma el resumen a partir de lo
+   que hay escrito en el formulario todavía sin guardar. Si hay adjuntos
+   pendientes de subir, los sube primero para poder armar sus links.
+   IMPORTANTE (Safari/iOS): navigator.clipboard.write() solo se puede llamar
+   dentro del "gesto del usuario" (el tap en el botón). Como acá hay pasos
+   asíncronos largos antes de tener el texto final (subir adjuntos, acortar
+   links), armamos una función asyncTextoListo() con todo ese trabajo y se la
+   pasamos como PROMESA a copiarTextoAlPortapapeles, que internamente llama a
+   clipboard.write() de inmediato (sin esperar la promesa primero). Así el
+   copiado sigue "dentro" del gesto del tap aunque el texto tarde en armarse. */
+export async function copiarResumenWhatsapp(){
+  const btnDeUna=document.querySelector('.btn-deuna');
+  const textoOriginalBtn=btnDeUna?btnDeUna.innerHTML:'';
+  const asyncTextoListo=(async()=>{
+    const ot=g('f-ot').value||'—';
+    let adjuntosSubidos=[];
+    const habiaPendientes=regAdjuntosPendientes.length>0;
+    if(habiaPendientes){
+      if(!ot||ot==='—'){throw new Error('Ingresa el N° de OT antes de generar el resumen: se necesita para guardar los archivos adjuntos.');}
+      if(btnDeUna)btnDeUna.innerHTML='<i class="ti ti-cloud-upload" aria-hidden="true"></i> Subiendo archivos...';
+      const nuevos=await subirRegAdjuntosPendientes(ot);
+      regAdjuntosYaSubidos=[...regAdjuntosYaSubidos,...nuevos];
+      adjuntosSubidos=regAdjuntosYaSubidos;
+    }else{
+      adjuntosSubidos=regAdjuntosYaSubidos;
+    }
+    if(btnDeUna)btnDeUna.innerHTML='<i class="ti ti-cloud-upload" aria-hidden="true"></i> Preparando enlaces...';
+    const rTmp={
+      ot,hinicio:g('f-hinicio').value,hsalida:g('f-hsalida').value,fecha:g('f-fecha').value,
+      cliente:g('f-cliente').value,tipo:rgVals['rg-tipo']||'',
+      tec1:g('f-tec1').value,tec2:g('f-tec2').value,tec3:g('f-tec3').value,tec4:g('f-tec4').value,
+      tecnicosExtra:tecnicosExtraValidos(),
+      productos:productosValidos(),video:rgVals['rg-video']||'No',google:rgVals['rg-google']||'No',
+      extras:extrasValidos(),
+      problema:joinProbField('problema'),
+      comuna:g('f-comuna').value,comentario:g('f-comentario').value,
+      adjuntos:adjuntosSubidos,
+      giftcard:rgVals['rg-giftcard']||'No',
+      giftcardCodigo:(g('f-giftcard-codigo')?.value||'').trim(),
+      giftcardDescuento:g('f-giftcard-desc')?.value?parseInt(g('f-giftcard-desc').value)||0:null
+    };
+    return armarTextoResumenWhatsapp(rTmp);
+  })();
+  if(btnDeUna)btnDeUna.disabled=true;
+  try{
+    await copiarTextoAlPortapapeles(asyncTextoListo);
+  }catch(e){
+    console.error('No se pudo generar/copiar el resumen:',e);
+    alert(e&&e.message?e.message:'Ocurrió un error al preparar el resumen.');
+  }finally{
+    if(btnDeUna){btnDeUna.disabled=false;btnDeUna.innerHTML=textoOriginalBtn;}
+  }
+}
+/* Botón "DE UNA!" del detalle de una OT YA GUARDADA (ver verDetalleRegistro):
+   permite regenerar el mismo resumen y los mismos links de descarga por si
+   el envío original falló, se pegó sin copiar los datos, o hubo un error y
+   hay que reenviarlo. Usa el registro tal como quedó guardado en Supabase,
+   no el formulario. */
+export async function copiarResumenWhatsappDesdeRegistro(id,btnEl){
+  const r=registros.find(x=>x.id===id);
+  if(!r){alert('No se encontró ese registro.');return;}
+  const textoOriginalBtn=btnEl?btnEl.innerHTML:'';
+  if(btnEl){btnEl.disabled=true;btnEl.innerHTML='<i class="ti ti-cloud-upload" aria-hidden="true"></i> Preparando enlaces...';}
+  try{
+    await copiarTextoAlPortapapeles(armarTextoResumenWhatsapp(r));
+  }finally{
+    if(btnEl){btnEl.disabled=false;btnEl.innerHTML=textoOriginalBtn;}
+  }
+}
+/* Copia texto al portapapeles de forma robusta, pensado especialmente para
+   Safari/iOS: ese navegador solo permite usar el portapapeles si la llamada
+   ocurre "dentro" del gesto del usuario (el tap). Como este resumen se arma
+   con pasos asíncronos antes (subir adjuntos, acortar links), para cuando
+   el texto está listo Safari ya puede considerar que el gesto "expiró" y
+   bloquea silenciosamente el copiado clásico (navigator.clipboard.writeText
+   y también el respaldo con execCommand).
+   La solución es pasarle a navigator.clipboard.write() un ClipboardItem
+   cuyo valor es una PROMESA (que resuelve al texto ya armado) en lugar del
+   texto ya resuelto. Safari sí acepta esto: la llamada a clipboard.write()
+   se hace en el momento del tap (síncrona), y el contenido se completa
+   después cuando la promesa resuelve. Así el copiado automático funciona
+   aunque el armado del texto tarde.
+   textoPromise: una Promise<string> que resuelve al texto a copiar (para
+   poder llamar a clipboard.write ANTES de esperar a que el texto esté listo).
+   Solo si esto y los métodos clásicos fallan, se muestra el modal con el
+   texto ya armado y un botón "Copiar" para que el técnico lo copie con un
+   tap fresco (nunca se usa el prompt() nativo, que es feo y confuso). */
+export async function copiarTextoAlPortapapeles(textoPromise){
+  // 1) Método preferido en Safari/iOS: ClipboardItem con promesa.
+  //    Se debe invocar SIN "await" antes, en el mismo tick del clic.
+  try{
+    if(navigator.clipboard&&window.ClipboardItem){
+      const blobPromise=Promise.resolve(textoPromise).then(t=>new Blob([t],{type:'text/plain'}));
+      await navigator.clipboard.write([new ClipboardItem({'text/plain':blobPromise})]);
+      alert('¡Copiado! Ya puedes pegarlo en WhatsApp.');
+      return;
+    }
+  }catch(e){
+    console.error('ClipboardItem con promesa falló, se intenta con writeText:',e);
+  }
+  // A partir de acá ya necesitamos el texto resuelto.
+  const texto=await Promise.resolve(textoPromise);
+  // 2) Método clásico (funciona bien en Chrome/Android y desktop).
+  try{
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      await navigator.clipboard.writeText(texto);
+      alert('¡Copiado! Ya puedes pegarlo en WhatsApp.');
+      return;
+    }
+    throw new Error('navigator.clipboard no disponible');
+  }catch(e){
+    console.error('Clipboard API falló, se intenta con execCommand:',e);
+  }
+  // 3) Respaldo con textarea oculto + execCommand (navegadores viejos).
+  try{
+    const ta=document.createElement('textarea');
+    ta.value=texto;
+    ta.style.position='fixed';
+    ta.style.top='0';
+    ta.style.left='0';
+    ta.style.opacity='0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok=document.execCommand('copy');
+    document.body.removeChild(ta);
+    if(ok){
+      alert('¡Copiado! Ya puedes pegarlo en WhatsApp.');
+      return;
+    }
+    throw new Error('execCommand copy devolvió false');
+  }catch(e){
+    console.error('execCommand copy también falló:',e);
+  }
+  // 4) Último recurso: modal propio con botón "Copiar" (en vez de prompt()).
+  mostrarModalCopyFallback(texto);
+}
+/* Guarda el texto pendiente para el botón "Copiar" del modal de respaldo. */
+export let copyFallbackTexto='';
+export function mostrarModalCopyFallback(texto){
+  copyFallbackTexto=texto;
+  const ta=g('modal-copy-fallback-text');
+  if(ta)ta.value=texto;
+  const modal=g('modal-copy-fallback');
+  if(modal)modal.style.display='flex';
+}
+export function cerrarModalCopyFallback(){
+  const modal=g('modal-copy-fallback');
+  if(modal)modal.style.display='none';
+}
+/* Botón "Copiar" del modal de respaldo: como este clic SÍ es un gesto de
+   usuario fresco (sin awaits previos), el copiado clásico normalmente
+   funciona acá aunque haya fallado antes. Si aun así fallara, selecciona
+   el texto del textarea para que el técnico lo copie manualmente con
+   "Copiar" del menú de selección de iOS/Android. */
+export async function copiarDesdeModalFallback(){
+  const btn=g('modal-copy-fallback-btn');
+  const textoOriginalBtn=btn?btn.innerHTML:'';
+  try{
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      await navigator.clipboard.writeText(copyFallbackTexto);
+      if(btn){btn.innerHTML='<i class="ti ti-check" aria-hidden="true"></i>¡Copiado!';setTimeout(()=>{if(btn)btn.innerHTML=textoOriginalBtn;},1500);}
+      return;
+    }
+    throw new Error('navigator.clipboard no disponible');
+  }catch(e){
+    console.error('Copiado desde modal falló, se selecciona el texto:',e);
+  }
+  const ta=g('modal-copy-fallback-text');
+  if(ta){
+    ta.focus();
+    ta.select();
+    ta.setSelectionRange(0,ta.value.length);
+    try{
+      const ok=document.execCommand('copy');
+      if(ok&&btn){btn.innerHTML='<i class="ti ti-check" aria-hidden="true"></i>¡Copiado!';setTimeout(()=>{if(btn)btn.innerHTML=textoOriginalBtn;},1500);return;}
+    }catch(e){}
+  }
+  alert('Selecciona el texto y usa "Copiar" del menú, o mantén presionado sobre el texto.');
+}
+/* Formatea una lista de textos para el resumen de WhatsApp:
+   - vacía -> 'No'
+   - un solo elemento -> se muestra en la misma línea, sin guion
+   - dos o más -> salto de línea y cada uno en su propia línea con "- " adelante,
+     para que cosas como Instaladores, Telas, Problemas o Adicionales que
+     tengan varios valores se vean uno debajo del otro y no todo amontonado
+     separado por comas o barras. */
+export function formatListaWhatsapp(items){
+  const lista=(items||[]).filter(Boolean);
+  if(!lista.length)return'No';
+  if(lista.length===1)return lista[0];
+  return'\n'+lista.map(v=>'- '+v).join('\n');
+}
+/* Calcula en tiempo real los km recorridos (Final - Inicial) mientras el usuario
+   escribe, mostrándolo en la tarjeta destacada del formulario de kilometraje. */
+export function calcularKmRecorridos(){
+  const kmi=parseInt(g('u-kmi').value)||0;
+  const kmf=parseInt(g('u-kmf').value)||0;
+  const card=g('km-recorridos-card');
+  const numEl=g('km-recorridos-num');
+  if(!card||!numEl)return;
+  const total=kmf-kmi;
+  if(kmi>0&&kmf>0&&total>=0){
+    numEl.textContent=total.toLocaleString('es-CL');
+    card.style.opacity='1';
+    card.classList.remove('km-recorridos-warn');
+  }else if(kmi>0&&kmf>0&&total<0){
+    numEl.textContent='KM final debe ser mayor al inicial';
+    card.classList.add('km-recorridos-warn');
+  }else{
+    numEl.textContent='0';
+    card.style.opacity='.6';
+    card.classList.remove('km-recorridos-warn');
+  }
+}
+export async function subirFotoUnidad(u,inputId,carpeta){
+  const fileInput=g(inputId);
+  let file=fileInput&&fileInput.files[0];
+  if(!file)return null;
+  if(file.size>15*1024*1024){alert('La foto de '+carpeta+' supera 15MB; el registro se guardará sin esa foto.');return null;}
+  file=await comprimirImagenSiHaceFalta(file);
+  if(!sbReady())return null;
+  const path='unidades/'+String(u.patente||'SIN_PATENTE').replace(/[^a-zA-Z0-9]/g,'_')+'/'+carpeta+'_'+u.id+'_'+file.name;
+  try{
+    const{error}=await sb.storage.from('vehiculo-documentos').upload(path,file);
+    if(error)throw error;
+    return path;
+  }catch(err){
+    alert('No se pudo subir la foto de '+carpeta+': '+((err&&err.message)||'intenta de nuevo.'));
+    return null;
+  }
+}
+export async function guardarUnidad(){
+  const kmi=parseInt(g('u-kmi').value)||0,kmf=parseInt(g('u-kmf').value)||0;
+  const fotoKmiInput=g('u-foto-kmi'),fotoKmfInput=g('u-foto-kmf');
+  if(!uniregSelected){alert('Selecciona una patente arriba antes de guardar.');return;}
+  if(!fotoKmiInput.files[0]){alert('La foto del kilometraje inicial es obligatoria.');return;}
+  if(!fotoKmfInput.files[0]){alert('La foto del kilometraje final es obligatoria.');return;}
+  if(kmf<kmi){alert('El kilometraje final no puede ser menor al inicial.');return;}
+  const u={id:Date.now(),fecha:g('u-fecha').value,mes:g('u-mes').value,
+    conductor:g('u-conductor').value,patente:uniregSelected,
+    kmi,kmf,total:kmf-kmi,comb:rgVals['rg-comb']||'',recarga:rgVals['rg-recarga']||'',
+    monto:parseInt(g('u-monto').value)||0,pago:g('u-pago').value,
+    /* Los campos de integrantes ya no se piden en el formulario, pero se
+       mantienen en el modelo de datos por compatibilidad con registros
+       antiguos (PDF/Excel siguen mostrando el dato si algún registro ya
+       lo tenía). Los inputs u-i1..u-i4 ya no existen en el DOM. */
+    i1:'',i2:'',i3:'',i4:'',
+    detalle:g('u-detalle').value,
+    creadoPor:currentUserName(),fotoPath:null,fotoKmiPath:null,fotoKmfPath:null};
+  u.fotoKmiPath=await subirFotoUnidad(u,'u-foto-kmi','KM_INICIAL');
+  u.fotoKmfPath=await subirFotoUnidad(u,'u-foto-kmf','KM_FINAL');
+  const fileInput=g('u-foto');
+  let file=fileInput&&fileInput.files[0];
+  if(file){
+    if(file.size>15*1024*1024){alert('La foto adicional supera 15MB; el registro se guardará sin esa foto.');}
+    else if(sbReady()){
+      file=await comprimirImagenSiHaceFalta(file);
+      const path='unidades/'+String(u.patente||'SIN_PATENTE').replace(/[^a-zA-Z0-9]/g,'_')+'/'+u.id+'_'+file.name;
+      try{const{error}=await sb.storage.from('vehiculo-documentos').upload(path,file);if(error)throw error;u.fotoPath=path;}
+      catch(err){alert('No se pudo subir la foto: '+((err&&err.message)||'intenta de nuevo.')+' El registro se guardará sin foto.');}
+    }
+  }
+  unidades.push(u);
+  const okU=await dbUpsertUnidad(u);
+  if(!okU){
+    __set_unidades(unidades.filter(x=>x.id!==u.id));
+    return;
+  }
+  showToast('toast-uni');
+  g('u-kmi').value='';g('u-kmf').value='';g('u-monto').value='';
+  g('u-detalle').value='';
+  if(fileInput)fileInput.value='';
+  fotoKmiInput.value='';fotoKmfInput.value='';
+  limpiarPreviewArchivo('u-foto-kmi');limpiarPreviewArchivo('u-foto-kmf');limpiarPreviewArchivo('u-foto');
+  calcularKmRecorridos();
+  renderUniTable();
+}
+export function showToast(id){
+  const t=g(id);t.style.display='flex';setTimeout(()=>t.style.display='none',3000);
+}
+/* Aviso grande a pantalla completa que confirma que la OT quedó guardada.
+   Se usa además del toast chico, porque en terreno (con poca señal, apuro,
+   o si el botón "DE UNA!" se traba copiando el resumen) el toast chico es
+   fácil de pasar por alto y genera dudas de si la orden se guardó o no.
+   Se cierra solo a los 4 segundos, o antes si el usuario toca la pantalla. */
+export let guardadoOkTimer=null;
+export function mostrarAvisoGuardadoOk(ot){
+  const overlay=g('guardado-ok-overlay');
+  if(!overlay)return;
+  const otEl=g('guardado-ok-ot');
+  if(otEl)otEl.textContent=ot?`OT ${ot}`:'';
+  clearTimeout(guardadoOkTimer);
+  overlay.classList.add('show');
+  guardadoOkTimer=setTimeout(cerrarAvisoGuardadoOk,4000);
+}
+export function cerrarAvisoGuardadoOk(){
+  const overlay=g('guardado-ok-overlay');
+  if(overlay)overlay.classList.remove('show');
+  clearTimeout(guardadoOkTimer);
+}
+export let toastBarTimer=null;
+/* Toast liviano tipo barra, para avisos que no necesitan tapar toda la
+   pantalla (a diferencia de mostrarAvisoGuardadoOk, pensado para el botón
+   grande "DE UNA!" de OT en terreno). Se usa en Mantenciones. */
+export function mostrarToastBar(msg){
+  const bar=g('toast-bar');
+  if(!bar)return;
+  g('toast-bar-msg').textContent=msg;
+  clearTimeout(toastBarTimer);
+  bar.classList.add('show');
+  toastBarTimer=setTimeout(()=>bar.classList.remove('show'),3200);
+}
+export function filtered(){
+  const mes=g('fil-mes')?.value||'';
+  const tec=g('fil-tec')?.value||'';
+  const fecha=g('fil-fecha')?.value||'';
+  const tipo=g('fil-tipo')?.value||'';
+  return registros.filter(r=>{
+    if(!isAdminUser()&&!esMiOT(r))return false;
+    if(mes&&r.mes!==mes)return false;
+    if(tec&&r.tec1!==tec&&r.tec2!==tec&&r.tec3!==tec&&r.tec4!==tec)return false;
+    if(fecha&&r.fecha!==fecha)return false;
+    if(tipo&&r.tipo!==tipo)return false;
+    if(otContext&&(r.ot||'').toLowerCase()!==otContext.ot.toLowerCase())return false;
+    return true;
+  });
+}
+export function clearFil(){g('fil-mes').value='';g('fil-tec').value='';g('fil-fecha').value='';g('fil-tipo').value='';renderDash();}
+
+export const CHART_COLORS=['#2a78d6','#1baf7a','#eda100','#4a3aa7','#e34948','#e87ba4','#eb6834','#008300','#00897B','#546E7A'];
+export function calcRankingTecnicos(data){
+  const stats={};
+  data.forEach(r=>{
+    [r.tec1,r.tec2,r.tec3,r.tec4].filter(Boolean).forEach(t=>{
+      if(!stats[t])stats[t]={total:0,sinProblema:0,google:0};
+      stats[t].total++;
+      if(!r.problema||r.problema.toUpperCase().includes('NINGUNO'))stats[t].sinProblema++;
+      if(evalFotosOT[r.ot]&&evalFotosOT[r.ot].googleReview)stats[t].google++;
+    });
+  });
+  return Object.keys(stats).map(t=>{
+    const s=stats[t];
+    const pctOk=s.sinProblema/s.total;
+    const pctGoogle=s.google/s.total;
+    const score=Math.max(0,Math.min(5,(pctOk*3)+(pctGoogle*2)));
+    return{nombre:t,stars:score,total:s.total};
+  }).sort((a,b)=>b.stars-a.stars);
+}
+export function starsHtml(n){
+  const full=Math.round(n);
+  let html='';
+  for(let i=1;i<=5;i++)html+=`<i class="ti ti-star${i<=full?'-filled':''}" aria-hidden="true" style="color:${i<=full?'#F5A623':'#D8D5CC'};font-size:21px"></i>`;
+  return html;
+}
+export function destroyCharts(){Object.values(charts).forEach(c=>{try{c.destroy();}catch(e){}});__set_charts({});}

@@ -1,0 +1,25 @@
+{
+  "name": "app_instalaciones",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "eslint": "^9.39.5",
+    "vite": "5.4.20"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.110.8",
+    "chart.js": "^4.5.1",
+    "jspdf": "2.5.1",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  }
+}
