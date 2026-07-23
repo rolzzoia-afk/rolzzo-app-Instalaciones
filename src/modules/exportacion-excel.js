@@ -179,7 +179,10 @@ export function rankingTopFotografia(){
   return Object.keys(porTecnico).map(nombre=>({nombre,avg:porTecnico[nombre].sum/porTecnico[nombre].n,n:porTecnico[nombre].n}))
     .filter(r=>r.n>0).sort((a,b)=>b.avg-a.avg||b.n-a.n);
 }
-/* Ranking ejecutivo: operadores que más reseñas de Google han cerrado con éxito, con tasa de éxito (histórico) */
+/* Ranking ejecutivo: operadores que más reseñas de Google han cerrado con éxito, con tasa de éxito (histórico).
+   Cuenta reseñas CONFIRMADAS en el seguimiento (evalFotosOT[ot].googleReview===true, alguien pegó el
+   comentario real que dejó el cliente), no lo que el técnico marcó al vuelo al generar la OT — ese
+   dato es solo una expectativa, no una reseña verificada. */
 export function rankingTopCierreResenas(){
   const byOt={};
   registros.forEach(r=>{
@@ -192,7 +195,7 @@ export function rankingTopCierreResenas(){
     [r.tec1,r.tec2,r.tec3,r.tec4].filter(Boolean).forEach(t=>{
       if(!porTecnico[t])porTecnico[t]={conResena:0,total:0};
       porTecnico[t].total++;
-      if((r.google||'No')==='Si')porTecnico[t].conResena++;
+      if(evalFotosOT[r.ot]?.googleReview===true)porTecnico[t].conResena++;
     });
   });
   return Object.keys(porTecnico).map(nombre=>{

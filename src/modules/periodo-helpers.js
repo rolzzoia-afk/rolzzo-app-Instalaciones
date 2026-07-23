@@ -138,6 +138,7 @@ export function clearRegReportesFil(){
   renderRegReportes();
 }
 export let regdetCurrentId=null;
+export function getRegdetCurrentId(){return regdetCurrentId;}
 export function verDetalleRegistro(id){
   const r=registros.find(x=>x.id===id);if(!r)return;
   regdetCurrentId=id;

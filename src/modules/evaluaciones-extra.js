@@ -2,7 +2,7 @@ import { dbDeleteEvalFoto, dbDeleteEvalNuevo, dbDeleteEvalNuevoIds, dbUpsertEval
 import { MESES, registros } from './core-data.js';
 import { CATS_NUEVO, DIAS_SEMANA, __set_evaluacionesFotos, __set_evaluacionesNuevo, avgLabel, dbUpsertEvalFotosOT, diasRestantes, ensureEvalFotosOT, esMiOT, escapeHtml, evalFotosOT, evalOpen, evaluacionesFotos, evaluacionesNuevo, formatFecha, graduadosList, historialOpen, isAdminUser, mesFromFecha, nuevoPersonaList, openObsEditor, renderChecklistBlock, renderComentariosBlock, renderDetalleEvalBlock, safeId, searchOT, setEvalFotosOTField, subAccordion, toggleEvalOpen } from './evaluaciones.js';
 import { g } from './form-helpers.js';
-import { exportPersonaPDF, generarInvitacionWhatsapp } from './selector-foto-galeria.js';
+import { exportPersonaPDF, generarAgradecimientoWhatsapp, generarInvitacionWhatsapp } from './selector-foto-galeria.js';
 
 /* ===== BLOQUE 5: invitación a reseña de Google (directo por WhatsApp) ===== */
 export function starRow(ot,persona,fecha,current){
@@ -42,17 +42,23 @@ export function computeAcordeonFotosOTs(){
   });
   return Object.values(byOt).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
 }
+/* Una OT se considera "Evaluada" (pasa a Historial) recién cuando tiene TANTO la nota
+   de estrellas COMO al menos un técnico marcado — así jefatura puede poner las estrellas
+   primero y seguir completando el resto sin que la OT desaparezca de Pendientes a medio camino. */
+export function evaluacionCompleta(m){
+  return !!(m&&m.adminNivel&&m.tecnicosEvaluados&&m.tecnicosEvaluados.length);
+}
 export function computeAcordeonFotosPendientes(){
-  return computeAcordeonFotosOTs().filter(r=>{const m=evalFotosOT[r.ot];return !(m&&m.adminNivel);});
+  return computeAcordeonFotosOTs().filter(r=>!evaluacionCompleta(evalFotosOT[r.ot]));
 }
 export function computeAcordeonFotosHistorial(){
-  return computeAcordeonFotosOTs().filter(r=>{const m=evalFotosOT[r.ot];return !!(m&&m.adminNivel);});
+  return computeAcordeonFotosOTs().filter(r=>evaluacionCompleta(evalFotosOT[r.ot]));
 }
 export function renderEvalFotosAccRow(r){
   const otJs=String(r.ot).replace(/'/g,"\\'");
   const abierta=efAcordeonOtAbierta===String(r.ot);
   const m=evalFotosOT[r.ot];
-  const evaluada=!!(m&&m.adminNivel);
+  const evaluada=evaluacionCompleta(m);
   return `<div class="ef-acc-item${abierta?' ef-acc-item-open':''}">
     <div class="reg-row resena-row" onclick="toggleEvalFotosAcordeonItem('${otJs}')">
       <div class="reg-row-info">
@@ -138,6 +144,7 @@ export function renderEvalFotosAccContent(ot){
 export function setAdminNivelAcc(ot,n){
   if(!isAdminUser())return;
   ensureEvalFotosOT(ot).adminNivel=n;
+  dbUpsertEvalFotosOT(ot);
   renderEvalFotosAcordeon();
 }
 export function toggleTecEvaluadoAcc(ot,nombre){
@@ -145,6 +152,7 @@ export function toggleTecEvaluadoAcc(ot,nombre){
   const m=ensureEvalFotosOT(ot);
   const i=m.tecnicosEvaluados.indexOf(nombre);
   if(i>=0)m.tecnicosEvaluados.splice(i,1);else m.tecnicosEvaluados.push(nombre);
+  dbUpsertEvalFotosOT(ot);
   renderEvalFotosAcordeon();
 }
 export function setClasificacionContenido(ot,val){
@@ -157,6 +165,7 @@ export function setClasificacionContenido(ot,val){
 export function setEvalFotosOTFieldAcc(ot,val){
   if(!isAdminUser())return;
   ensureEvalFotosOT(ot).comentarioAdmin=val;
+  dbUpsertEvalFotosOT(ot);
 }
 export async function guardarNotaAdminAcc(ot){
   if(!isAdminUser())return;
@@ -176,12 +185,14 @@ export async function guardarNotaAdminAcc(ot){
   alert('Evaluación guardada para: '+m.tecnicosEvaluados.join(', '));
 }
 
-/* --- Seguimiento · Reseñas: acordeón puro dividido en Pendientes / Alerta / Historial, filtrado por rol --- */
+/* --- Seguimiento · Reseñas: acordeón puro dividido en Pendientes / Alerta / Historial.
+   A diferencia de la ficha de evaluación completa, este panel es compartido: cualquier
+   usuario logueado ve el seguimiento/reseñas de TODAS las OT (no solo las propias),
+   para que el equipo tenga visibilidad conjunta de cómo van las reseñas de Google. */
 export function computeResenasTodas(){
   const byOt={};
   registros.forEach(r=>{
     if(!r.ot)return;
-    if(!esMiOT(r))return;
     const prev=byOt[r.ot];
     if(!prev||(r.id||0)>(prev.id||0))byOt[r.ot]=r;
   });
@@ -369,7 +380,7 @@ export function toggleSegResenaItem(ot){
 }
 export function renderSegResenaAccContent(ot){
   const r=registros.filter(x=>(x.ot||'')===String(ot)).sort((a,b)=>(b.id||0)-(a.id||0))[0];
-  if(!r||!esMiOT(r))return '<div class="eval-empty">No se pudo abrir esta OT.</div>';
+  if(!r)return '<div class="eval-empty">No se pudo abrir esta OT.</div>';
   const otJs=String(ot).replace(/'/g,"\\'");
   const sid=safeId(String(ot));
   const meta=ensureEvalFotosOT(ot);
@@ -406,16 +417,18 @@ export function renderSegResenaAccContent(ot){
       <p class="sec-lbl" style="--sec-color:#eda100">¿El cliente terminó de dejar su reseña en Google?</p>
       ${googleBlock}
     </div>
-    <div class="ot-block" style="--bc:#1D6F42;margin:0;border-top:none;border-radius:0">
-      <div class="ot-block-head"><span class="ot-block-title"><span class="ot-block-num" style="background:#1D6F42">2</span><i class="ti ti-brand-whatsapp" aria-hidden="true"></i>Invitación a reseña para el cliente</span></div>
-      <p style="font-size:11.5px;color:var(--text-muted);margin:-.3rem 0 1rem;text-align:center">Completa los datos y abre WhatsApp con el mensaje ya escrito, listo para enviar.</p>
+    <div class="ot-block ot-block-wa${meta.googleReview?' ot-block-wa-gracias':''}" style="--bc:#1D6F42;margin:0;border-top:none;border-radius:0">
+      <div class="ot-block-head"><span class="ot-block-title"><span class="ot-block-num" style="background:#1D6F42">2</span><i class="ti ti-brand-whatsapp" aria-hidden="true"></i>${meta.googleReview?'Agradecimiento por su reseña':'Invitación a reseña para el cliente'}</span></div>
+      <p style="font-size:11.5px;color:var(--text-muted);margin:-.3rem 0 1rem;text-align:center">${meta.googleReview?'El cliente ya dejó su reseña — envíale un agradecimiento con un mensaje ya escrito, listo para mandar.':'Completa los datos y abre WhatsApp con el mensaje ya escrito, listo para enviar.'}</p>
       <div class="fg" style="max-width:640px;margin:0 auto">
         <div class="field"><label>Nombre cliente</label><input type="text" id="inv-cliente-${sid}" value="${escapeHtml(r.cliente||'')}"></div>
         <div class="field"><label>Nombre técnico</label><input type="text" id="inv-tecnico-${sid}" value="${escapeHtml(r.tec1||'')}"></div>
         <div class="field"><label>Teléfono cliente (WhatsApp)</label><input type="tel" id="inv-telefono-${sid}" value="${escapeHtml(r.telefono||'')}" placeholder="Ej: +56912345678"></div>
       </div>
       <div style="text-align:center;margin-top:1.1rem">
-        <button class="btn" style="background:#1D6F42;border-color:#1D6F42" onclick="generarInvitacionWhatsapp('${otJs}')"><i class="ti ti-brand-whatsapp" aria-hidden="true"></i>Enviar por WhatsApp</button>
+        ${meta.googleReview
+          ?`<button class="btn wa-send-btn" onclick="generarAgradecimientoWhatsapp('${otJs}')"><i class="ti ti-brand-whatsapp" aria-hidden="true"></i>Enviar agradecimiento por WhatsApp</button>`
+          :`<button class="btn" style="background:#1D6F42;border-color:#1D6F42" onclick="generarInvitacionWhatsapp('${otJs}')"><i class="ti ti-brand-whatsapp" aria-hidden="true"></i>Enviar por WhatsApp</button>`}
       </div>
     </div>
   </div>`;

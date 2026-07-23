@@ -13,7 +13,25 @@ export function selRg(grp,el,val){
   el.classList.add('sel');
   rgVals[grp]=val;
   if(grp==='rg-giftcard')actualizarCamposGiftcard();
+  if(grp==='rg-google')actualizarWhatsappRegistro();
   if(grp.startsWith('rg-')&&grp!=='rg-comb'&&grp!=='rg-recarga'&&!grp.startsWith('rg-finst-'))scheduleRegDraftSave();
+}
+/* Muestra el bloque de "Enviar invitación por WhatsApp" cuando se marca que
+   se le pedirá al cliente que deje su reseña de Google, con una vista previa
+   de a quién y a qué número se le va a enviar (para que quede claro antes
+   de mandar el mensaje). */
+export function actualizarWhatsappRegistro(){
+  const wrap=g('reg-wa-gracias-wrap');
+  if(!wrap)return;
+  const esSi=rgVals['rg-google']==='Si';
+  wrap.style.display=esSi?'':'none';
+  if(!esSi)return;
+  const preview=g('reg-wa-preview');
+  if(!preview)return;
+  const cliente=(g('f-cliente').value||'').trim();
+  const telefono=(g('f-telefono-cliente').value||'').trim();
+  if(!cliente&&!telefono){preview.textContent='Escribe el nombre y teléfono del cliente más arriba.';return;}
+  preview.textContent='Se enviará a: '+(cliente||'(sin nombre)')+' · '+(telefono||'(sin teléfono)');
 }
 /* Muestra/oculta los campos "Código giftcard" y "% Descuento" según si el
    toggle "¿Giftcard?" está en Sí o No. Si se pasa a No, limpia los campos

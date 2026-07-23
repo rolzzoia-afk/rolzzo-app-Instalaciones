@@ -52,13 +52,30 @@ export async function abrirEscaner(onDone){
     return;
   }
   try{
-    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1920},height:{ideal:1080}}});
+    /* Pedimos la resolución más alta posible (muchos celulares dan bastante más
+       que Full HD para la cámara trasera): así el documento escaneado y recortado
+       queda con texto legible en vez de verse borroso al hacer zoom. El navegador
+       usa lo mejor que el dispositivo soporte hasta este ideal, sin fallar si no
+       llega a tanto. */
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:3840},height:{ideal:2160}}});
     scanState.stream=stream;
+    scanAsegurarEnfoqueContinuo(stream);
     scanRenderCameraStage(stream);
   }catch(e){
     alert('No se pudo acceder a la cámara. Puedes revisar los permisos del navegador, o usar "Subir de galería" en vez de escanear.');
     cerrarEscaner();
   }
+}
+/* Fuerza enfoque automático continuo en la cámara trasera si el navegador lo permite
+   (Chrome/Android sí; Safari/iOS no expone esta opción, así que se ignora sin error). */
+function scanAsegurarEnfoqueContinuo(stream){
+  try{
+    const track=stream.getVideoTracks()[0];
+    const caps=track.getCapabilities?track.getCapabilities():null;
+    if(caps&&caps.focusMode&&caps.focusMode.includes('continuous')){
+      track.applyConstraints({advanced:[{focusMode:'continuous'}]}).catch(()=>{});
+    }
+  }catch(e){/* no soportado en este navegador, no es grave */}
 }
 export function cerrarEscaner(){
   if(scanState&&scanState.stream)scanState.stream.getTracks().forEach(t=>t.stop());
@@ -70,14 +87,27 @@ export function scanRenderLoadingStage(msg){
 }
 export function scanRenderShutterBar(){
   g('scan-bottombar').innerHTML=`<button class="scan-btn-sec" onclick="scanElegirGaleria()"><i class="ti ti-photo" aria-hidden="true"></i> Galería</button>
-    <button class="scan-shutter" onclick="scanTomarFoto()" title="Tomar foto"></button>
+    <button class="scan-shutter" id="scan-shutter-btn" onclick="scanTomarFoto()" title="Tomar foto"></button>
     <span style="width:90px"></span>`;
+}
+/* Deja el botón de disparo deshabilitado un instante apenas se abre la cámara,
+   para darle tiempo al enfoque automático a estabilizarse antes de poder tomar
+   la foto (si se dispara de inmediato, suele salir borrosa). */
+function scanEsperarEnfoqueAntesDeDisparar(){
+  const btn=g('scan-shutter-btn');
+  if(!btn)return;
+  btn.disabled=true;
+  btn.classList.add('scan-shutter-esperando');
+  setTimeout(()=>{
+    if(btn){btn.disabled=false;btn.classList.remove('scan-shutter-esperando');}
+  },900);
 }
 export function scanRenderCameraStage(stream){
   const stage=g('scan-stage');
   stage.innerHTML=`<video id="scan-video" autoplay playsinline muted></video>`;
   const video=g('scan-video');
   video.srcObject=stream;
+  scanEsperarEnfoqueAntesDeDisparar();
 }
 /* Permite escanear una foto ya existente (galería) en vez de usar la cámara
    en vivo — útil si la cámara falla o si el técnico ya tiene la foto tomada. */

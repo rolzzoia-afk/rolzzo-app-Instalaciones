@@ -83,7 +83,7 @@ export function renderDash(){
   const conProb=conProbList.length;
   const conGoogle=data.filter(r=>evalFotosOT[r.ot]&&evalFotosOT[r.ot].googleReview).length;
   const totalCort=data.reduce((s,r)=>s+(r.cantidad||0),0);
-  const conTraslado=data.filter(r=>r.traslado&&r.traslado!=='No aplica'&&r.traslado!=='').length;
+  const conTraslado=data.filter(r=>r.traslado&&r.traslado.toUpperCase()!=='NO APLICA'&&r.traslado!=='').length;
   const duraciones=data.filter(r=>r.durMin>0).map(r=>r.durMin);
   const avgDur=duraciones.length?Math.round(duraciones.reduce((s,v)=>s+v,0)/duraciones.length):0;
 

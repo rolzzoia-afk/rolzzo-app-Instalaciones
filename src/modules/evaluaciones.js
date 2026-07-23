@@ -77,6 +77,19 @@ export function starAvgLabel(avg){
 export function escapeHtml(str){
   return String(str).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
+/* Primer nombre de un nombre completo (ej: "Juan Pérez Soto" -> "Juan"), para
+   mostrar de forma más corta en fichas donde el nombre completo no es necesario. */
+export function primerNombre(nombreCompleto){
+  return String(nombreCompleto||'').trim().split(/\s+/)[0]||'';
+}
+/* Une una lista de nombres de forma natural: "Juan", "Juan y Pedro",
+   "Juan, Pedro y Ana" (usado para la sugerencia de fotógrafos). */
+export function joinConY(items){
+  const lista=(items||[]).filter(Boolean);
+  if(!lista.length)return'';
+  if(lista.length===1)return lista[0];
+  return lista.slice(0,-1).join(', ')+' y '+lista[lista.length-1];
+}
 
 /* --- Modal de comentario completo --- */
 export let obsModalId=null;
@@ -542,10 +555,12 @@ export function toggleTecEvaluado(ot,nombre){
   const m=ensureEvalFotosOT(ot);
   const i=m.tecnicosEvaluados.indexOf(nombre);
   if(i>=0)m.tecnicosEvaluados.splice(i,1);else m.tecnicosEvaluados.push(nombre);
+  dbUpsertEvalFotosOT(ot);
   searchOT();
 }
 export function setAdminNivel(ot,n){
   ensureEvalFotosOT(ot).adminNivel=n;
+  dbUpsertEvalFotosOT(ot);
   searchOT();
 }
 export async function guardarNotaAdmin(ot){
@@ -604,7 +619,7 @@ export function searchOT(otValArg,resultElIdArg){
       <div class="ot-header-cell"><label>Cliente</label><span>${escapeHtml(r.cliente||'—')}</span></div>
       <div class="ot-header-cell"><label>Tipo de cortina</label><span>${escapeHtml(r.tipoCortina||'—')}</span></div>
       <div class="ot-header-cell"><label>Cantidad</label><span>${r.cantidad||'—'}</span></div>
-      <div class="ot-header-cell"><label>Técnico principal</label><span>${escapeHtml(r.tec1||'—')}</span></div>
+      <div class="ot-header-cell"><label>Técnico principal</label><span>${escapeHtml(r.tec1?primerNombre(r.tec1):'—')}</span></div>
       <div class="ot-header-cell"><label>Fecha</label><span>${r.fecha?formatFecha(r.fecha):'—'}</span></div>
     </div>
   </div>`;
@@ -692,8 +707,11 @@ export function searchOT(otValArg,resultElIdArg){
     <div class="stars-picker">
       ${[1,2,3,4,5].map(n=>`<button data-n="${n}" class="${meta.adminNivel===n?'sel':''}" onclick="setAdminNivel('${otJs}',${n})"><i class="ti ti-star${meta.adminNivel>=n?'-filled':''}" aria-hidden="true"></i>${n} Estrella${n>1?'s':''}</button>`).join('')}
     </div>`;
+  const fotografosSugerencia=(r.fotografos&&r.fotografos.length)?`
+    <p class="ef-fotografos-sug"><i class="ti ti-camera" aria-hidden="true"></i>En esta OT apoyaron sacando las fotos: <b>${escapeHtml(joinConY(r.fotografos.map(primerNombre)))}</b></p>`:'';
   const tecCheck=`
     <p class="sec-lbl" style="--sec-color:#C2427A;margin-top:0">¿A quién aplica esta nota?</p>
+    ${fotografosSugerencia}
     <div class="tec-check-grid">
       ${tecs.map(t=>{const sel=meta.tecnicosEvaluados.includes(t);const tJs=t.replace(/'/g,"\\'");return `<label class="tec-check ${sel?'sel':''}" onclick="event.preventDefault();toggleTecEvaluado('${otJs}','${tJs}')"><input type="checkbox" ${sel?'checked':''}>${escapeHtml(t)}</label>`;}).join('')}
       ${tecs.length>1?`<label class="tec-check" onclick="event.preventDefault();tecs_selectAll_${sid}()">Marcar todos</label>`:''}

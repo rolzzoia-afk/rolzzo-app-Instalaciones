@@ -235,6 +235,23 @@ export function generarInvitacionWhatsapp(ot){
   const url=telLimpio?`https://wa.me/${telLimpio.replace(/^\+/,'')}?text=${encodeURIComponent(mensaje)}`:`https://wa.me/?text=${encodeURIComponent(mensaje)}`;
   window.open(url,'_blank');
 }
+/* Una vez que el cliente YA dejó su reseña en Google, envía un agradecimiento
+   por WhatsApp en vez de seguir invitándolo a dejarla (misma mecánica que
+   generarInvitacionWhatsapp, mensaje distinto). */
+export function generarAgradecimientoWhatsapp(ot){
+  const sid=safeId(String(ot));
+  const cliente=(g('inv-cliente-'+sid).value||'').trim();
+  const tecnico=(g('inv-tecnico-'+sid).value||'').trim();
+  const telInput=g('inv-telefono-'+sid);
+  const telefono=telInput?(telInput.value||'').trim():'';
+  if(!cliente){alert('Escribe el nombre del cliente.');return;}
+
+  const mensaje=`¡Hola, ${cliente}! Somos el equipo de Rolzzo 😊. Queremos agradecerte de corazón por tomarte un momento para dejarnos tu reseña en Google${tecnico?`, y por la confianza en ${tecnico}`:''}. Nos ayuda muchísimo a seguir mejorando. ¡Fue un placer trabajar contigo! 🙌✨`;
+
+  const telLimpio=telefono.replace(/[^0-9+]/g,'');
+  const url=telLimpio?`https://wa.me/${telLimpio.replace(/^\+/,'')}?text=${encodeURIComponent(mensaje)}`:`https://wa.me/?text=${encodeURIComponent(mensaje)}`;
+  window.open(url,'_blank');
+}
 export const CRITERIOS_EVAL_PDF=[
   {titulo:'Calidad técnica',desc:'Correcta instalación, nivelación, fijación firme, uso adecuado de las herramientas.'},
   {titulo:'Productividad',desc:'Tiempo de instalación, cantidad de cortinas instaladas, cumplimiento de plazo, organización del trabajo y espacios.'},

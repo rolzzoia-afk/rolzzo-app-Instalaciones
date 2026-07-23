@@ -11,6 +11,7 @@ export let flotaSelected=null;
 export function __set_flotaSelected(v){ flotaSelected = v; }
 export let flotaEditId=null;
 export function __set_flotaEditId(v){ flotaEditId = v; } /* id de la regla que se está editando en el modal, o null si es nueva */
+export function getFlotaEditId(){return flotaEditId;}
 
 /* Cada regla vive en vehiculoData[patente].reglasMant = [
      {id, desc, modo:'km'|'tiempo', intervaloKm, intervaloMeses, ultimoKm, ultimaFecha}

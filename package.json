@@ -6,13 +6,18 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check:lint": "eslint src/modules",
+    "check:globals": "node scripts/check-window-exposure.js",
+    "check": "npm run check:lint && npm run check:globals"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "devDependencies": {
+    "acorn": "^8.17.0",
+    "acorn-walk": "^8.3.5",
     "eslint": "^9.39.5",
     "vite": "5.4.20"
   },

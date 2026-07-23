@@ -1,10 +1,10 @@
-import { dbUpsertRegistro, dbUpsertUnidad, sb, sbReady } from './bootstrap.js';
+import { GOOGLE_REVIEW_LINK, dbUpsertRegistro, dbUpsertUnidad, sb, sbReady } from './bootstrap.js';
 import { __set_charts, __set_registros, __set_unidades, charts, currentTab, lists, otContext, registros, rgVals, session, unidades } from './core-data.js';
 import { renderDash, renderUniTable } from './dashboard-kpis.js';
 import { dbUpsertEvalFotosOT, ensureEvalFotosOT, esMiOT, escapeHtml, evalFotosOT, isAdminUser } from './evaluaciones.js';
 import { renderSegResenas } from './evaluaciones-extra.js';
 import { __set_extraRows, extraRows, extrasValidos, renderExtraRows } from './form-adicionales-garantia.js';
-import { actualizarCamposGiftcard, calcDur, g, selRg, toggleAnclaje } from './form-helpers.js';
+import { actualizarCamposGiftcard, actualizarWhatsappRegistro, calcDur, g, selRg, toggleAnclaje } from './form-helpers.js';
 import { __set_productoRows, productoRows, productosValidos, renderProductoRows } from './form-productos.js';
 import { __set_fotografos, __set_materialRows, __set_tecnicosExtra, fotografos, fotografosValidos, materialRows, materialesValidos, renderFotografosRows, renderMaterialRows, renderTecnicosExtra, resetFotografos, resetMaterialRows, tecnicosExtra, tecnicosExtraValidos } from './form-tecnicos-extra.js';
 import { verDetalleRegistro } from './periodo-helpers.js';
@@ -243,7 +243,7 @@ export function regDraftKey(){
   const codigo=(session&&session.codigo)?session.codigo:'sin-sesion';
   return REG_DRAFT_KEY_BASE+'_'+codigo;
 }
-export const REG_DRAFT_FIELD_IDS=['f-fecha','f-mes','f-ot','f-cliente','f-tec1','f-tec2','f-tec3','f-tec4',
+export const REG_DRAFT_FIELD_IDS=['f-fecha','f-mes','f-ot','f-cliente','f-telefono-cliente','f-tec1','f-tec2','f-tec3','f-tec4',
   'f-hinicio','f-hsalida','f-traslado','f-ubic','f-codmotor',
   'f-calle','f-numero','f-region','f-comuna','f-seg-comentario','f-comentario',
   'f-giftcard-codigo','f-giftcard-desc'];
@@ -318,6 +318,7 @@ export function applyRegDraftToForm(draft){
     });
     renderFotografosRows();
     actualizarCamposGiftcard();
+    actualizarWhatsappRegistro();
     if(g('f-region').value)populateComunasForRegion('f-region','f-comuna',draft.fields&&draft.fields['f-comuna']);
     else populateComunasForRegion('f-region','f-comuna');
     calcDur();
@@ -333,6 +334,7 @@ export function blankRegForm(){
   resetMaterialRows();
   resetFotografos();
   actualizarCamposGiftcard();
+  actualizarWhatsappRegistro();
   g('dur-display').textContent='';
   regAdjuntosPendientes=[];
   regAdjuntosYaSubidos=[];
@@ -533,6 +535,9 @@ export async function copiarResumenWhatsappDesdeRegistro(id,btnEl){
   if(btnEl){btnEl.disabled=true;btnEl.innerHTML='<i class="ti ti-cloud-upload" aria-hidden="true"></i> Preparando enlaces...';}
   try{
     await copiarTextoAlPortapapeles(armarTextoResumenWhatsapp(r));
+  }catch(e){
+    console.error('No se pudo generar/copiar el resumen:',e);
+    alert(e&&e.message?e.message:'Ocurrió un error al preparar el resumen.');
   }finally{
     if(btnEl){btnEl.disabled=false;btnEl.innerHTML=textoOriginalBtn;}
   }
@@ -660,6 +665,24 @@ export function formatListaWhatsapp(items){
   if(!lista.length)return'No';
   if(lista.length===1)return lista[0];
   return'\n'+lista.map(v=>'- '+v).join('\n');
+}
+/* Botón "Enviar invitación por WhatsApp" que aparece en el formulario "OT nueva"
+   apenas se marca "Sí" en Reseña Google (o sea, se le va a pedir al cliente que
+   deje su reseña). Usa el nombre del cliente, el técnico principal y el teléfono
+   que se haya escrito más arriba en el formulario, y el mismo link/mensaje de
+   invitación que se usa en Evaluaciones. */
+export function enviarInvitacionRegistro(){
+  const cliente=(g('f-cliente').value||'').trim();
+  const tecnico=(g('f-tec1').value||'').trim();
+  const telefono=(g('f-telefono-cliente').value||'').trim();
+  if(!cliente){alert('Escribe el nombre del cliente.');return;}
+  if(!telefono){alert('Escribe el teléfono del cliente para poder enviarle el mensaje por WhatsApp.');return;}
+
+  const mensaje=`¡Hola, ${cliente}! Somos el equipo de Rolzzo. ${tecnico||'Nuestro técnico'} nos confirmó que tu instalación quedó lista. Si quedaste conforme, ¿nos ayudarías con una calificación de 5 estrellas en Google? ${GOOGLE_REVIEW_LINK} ¡Gracias por tu confianza!`;
+
+  const telLimpio=telefono.replace(/[^0-9+]/g,'');
+  const url=`https://wa.me/${telLimpio.replace(/^\+/,'')}?text=${encodeURIComponent(mensaje)}`;
+  window.open(url,'_blank');
 }
 /* Calcula en tiempo real los km recorridos (Final - Inicial) mientras el usuario
    escribe, mostrándolo en la tarjeta destacada del formulario de kilometraje. */
