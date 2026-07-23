@@ -17,7 +17,7 @@ import { renderUniregChips } from './unidad-patente-selector.js';
 
 /* ===== NAV ===== */
 export const ALL_PERM_ITEMS=[
-  {key:'regnew',label:'Registro · Formulario'},{key:'regrep',label:'Registro · Reportes'},{key:'reg_formulario',label:'Registro · Reporte de Instalación'},{key:'dash',label:'Dashboard'},
+  {key:'regnew',label:'Registro · Registro (nueva visita)'},{key:'regrep',label:'Registro · Reportes'},{key:'reg_formulario',label:'Registro · Formulario (reporte de instalación)'},{key:'dash',label:'Dashboard'},
   {key:'unireg',label:'Unidad · Registro'},{key:'unimant',label:'Unidad · Mantenciones'},{key:'uniflota',label:'Unidad · Estado de flota'},{key:'unirep',label:'Unidad · Reportes'},
   {key:'seg_resenas',label:'Seguimiento · Reseñas'},{key:'seg_fotos',label:'Seguimiento · Evaluación de Fotos'},{key:'seg_reportes',label:'Seguimiento · Reportes'},
   {key:'evalnuevo',label:'Evaluaciones · Personal Nuevo'},
