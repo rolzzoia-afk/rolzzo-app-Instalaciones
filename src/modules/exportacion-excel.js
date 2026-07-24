@@ -1,5 +1,6 @@
 import { MESES, personas, registros, session, unidades, vehiculoData } from './core-data.js';
 import { CATS_NUEVO, avgLabel, diasRestantes, esMiOT, escapeHtml, evalFotosOT, evaluacionesFotos, evaluacionesNuevo, isAdminUser, mesFromFecha, nuevoPersonaList, safeId } from './evaluaciones.js';
+import { pdfCheckPageBreak, pdfDrawHeader, pdfDrawTitleBlock, pdfSectionBar } from './evaluaciones-pdf.js';
 import { anclajeLabel, g, nivelDifLabel } from './form-helpers.js';
 import { currentUserName } from './reportes-unidad.js';
 
@@ -60,14 +61,14 @@ export function computeSegReportesPorOperador(){
       if((r.google||'No')==='Si')st.conResena++;else st.sinResena++;
     });
     const m=evalFotosOT[r.ot];
-    if(m&&m.adminNivel){
+    /* Solo lo clasificado "Apta para Redes Sociales" cuenta como evaluación real
+       en el reporte de calidad — "Solo Respaldo Técnico" queda fuera aunque tenga
+       nota y técnico marcados (pedido explícito de jefatura). */
+    if(m&&m.adminNivel&&m.clasificacionContenido==='redes'){
       (m.tecnicosEvaluados&&m.tecnicosEvaluados.length?m.tecnicosEvaluados:tecnicosOT).forEach(t=>{
-        ensure(t).notasFotos.push(m.adminNivel);
-      });
-    }
-    if(m&&m.clasificacionContenido==='redes'){
-      (m.tecnicosEvaluados&&m.tecnicosEvaluados.length?m.tecnicosEvaluados:tecnicosOT).forEach(t=>{
-        ensure(t).aptasRedes++;
+        const st=ensure(t);
+        st.notasFotos.push(m.adminNivel);
+        st.aptasRedes++;
       });
     }
   });
@@ -143,6 +144,108 @@ export function exportSegReportesExcel(){
   }));
   xlsxDownload(data,'Reportes Calidad','Seguimiento_Reportes_Calidad.xlsx');
 }
+/* Reporte PDF de calidad y seguimiento (cierre de reseñas + evaluación de
+   fotos por operador, más el ranking general del equipo), con el mismo
+   encabezado/formato que el resto de los PDFs de la app — pensado para
+   entregar a otra área (ej. Finanzas) sin tener que reformatear nada. */
+export function exportSegReportesPDF(){
+  if(!window.jspdf){alert('No se pudo cargar el generador de PDF. Revisa tu conexión e intenta de nuevo.');return;}
+  let rows=computeSegReportesPorOperador();
+  if(!isAdminUser()){
+    const yo=currentUserName();
+    rows=rows.filter(r=>r.nombre===yo);
+  }
+  if(!rows.length){alert('No hay datos para exportar con el filtro actual.');return;}
+  const mesFiltro=(g('segrep-fil-mes')?g('segrep-fil-mes').value:'')||'';
+  const{jsPDF}=window.jspdf;
+  const doc=new jsPDF({unit:'pt',format:'a4'});
+  const marginX=36;
+  const pageW=doc.internal.pageSize.getWidth();
+  pdfDrawHeader(doc,pageW);
+  let y=pdfDrawTitleBlock(doc,pageW,marginX,'Reporte de calidad y seguimiento',
+    `Generado el ${new Date().toLocaleDateString('es-CL')}${mesFiltro?' · Mes: '+mesFiltro:' · Todos los meses'}`);
+
+  const colResenas=[marginX,marginX+230,marginX+330,marginX+430];
+  y=pdfSectionBar(doc,y,marginX,pageW,'CIERRE DE RESEÑAS GOOGLE POR OPERADOR',[237,161,0]);
+  doc.setFont('helvetica','bold');doc.setFontSize(8.5);doc.setTextColor(110);
+  doc.text('OPERADOR',colResenas[0],y);doc.text('CON RESEÑA',colResenas[1],y);doc.text('SIN RESEÑA',colResenas[2],y);doc.text('TASA DE ÉXITO',colResenas[3],y);
+  doc.setTextColor(0);y+=6;
+  doc.setDrawColor(225,225,225);doc.setLineWidth(0.6);doc.line(marginX,y,pageW-marginX,y);
+  y+=13;
+  doc.setFont('helvetica','normal');
+  rows.forEach(r=>{
+    y=pdfCheckPageBreak(doc,y,14);
+    doc.text(String(r.nombre),colResenas[0],y);
+    doc.text(String(r.conResena),colResenas[1],y);
+    doc.text(String(r.sinResena),colResenas[2],y);
+    doc.text(r.tasaExito!=null?r.tasaExito+'%':'—',colResenas[3],y);
+    y+=14;
+  });
+  y+=8;
+
+  const colFotos=[marginX,marginX+300,marginX+440];
+  y=pdfSectionBar(doc,y,marginX,pageW,'EVALUACIÓN DE FOTOS POR OPERADOR',[79,70,229]);
+  const conNota=rows.filter(r=>r.notaProm!=null);
+  if(!conNota.length){
+    doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(140);
+    doc.text('Sin evaluaciones de fotos registradas todavía (Seguimiento - Evaluación de Fotos).',marginX,y);y+=14;
+    doc.setTextColor(0);
+  }else{
+    doc.setFont('helvetica','bold');doc.setFontSize(8.5);doc.setTextColor(110);
+    doc.text('OPERADOR',colFotos[0],y);doc.text('NOTA PROMEDIO',colFotos[1],y);doc.text('APTAS PARA REDES',colFotos[2],y);
+    doc.setTextColor(0);y+=6;
+    doc.setDrawColor(225,225,225);doc.line(marginX,y,pageW-marginX,y);
+    y+=13;
+    doc.setFont('helvetica','normal');
+    rows.forEach(r=>{
+      y=pdfCheckPageBreak(doc,y,14);
+      doc.text(String(r.nombre),colFotos[0],y);
+      doc.text(r.notaProm!=null?r.notaProm.toFixed(1)+' / 5':'—',colFotos[1],y);
+      doc.text(r.aptasRedes?String(r.aptasRedes):'—',colFotos[2],y);
+      y+=14;
+    });
+  }
+  y+=8;
+
+  /* El ranking general (comparativo de TODO el equipo, no solo lo que ve
+     este usuario) es la misma info admin-only que ya se muestra en pantalla
+     bajo "Rankings Globales del Equipo". */
+  if(isAdminUser()){
+    const topFoto=rankingTopFotografia();
+    const topResena=rankingTopCierreResenas();
+    y=pdfSectionBar(doc,y,marginX,pageW,'RANKING GENERAL DEL EQUIPO · TOP FOTOGRAFÍA',[79,70,229]);
+    doc.setFont('helvetica','normal');doc.setFontSize(8.5);
+    if(!topFoto.length){
+      doc.setTextColor(140);
+      doc.text('Sin evaluaciones de fotos registradas todavía.',marginX,y);y+=14;
+      doc.setTextColor(0);
+    }else{
+      topFoto.forEach((r,i)=>{
+        y=pdfCheckPageBreak(doc,y,14);
+        doc.text(`${i+1}.  ${r.nombre}`,marginX,y);
+        doc.text(`${r.avg.toFixed(1)} / 5  ·  ${r.n} evaluaciones`,pageW-marginX,y,{align:'right'});
+        y+=14;
+      });
+    }
+    y+=6;
+    y=pdfSectionBar(doc,y,marginX,pageW,'RANKING GENERAL DEL EQUIPO · TOP CIERRE DE RESEÑAS',[237,161,0]);
+    doc.setFont('helvetica','normal');doc.setFontSize(8.5);
+    if(!topResena.length){
+      doc.setTextColor(140);
+      doc.text('Sin OTs registradas todavía.',marginX,y);y+=14;
+      doc.setTextColor(0);
+    }else{
+      topResena.forEach((r,i)=>{
+        y=pdfCheckPageBreak(doc,y,14);
+        doc.text(`${i+1}.  ${r.nombre}`,marginX,y);
+        doc.text(`${r.total}/${r.otsAsignadas} OTs  ·  ${r.tasaExito}%`,pageW-marginX,y,{align:'right'});
+        y+=14;
+      });
+    }
+  }
+
+  doc.save(`Reporte_Calidad_Seguimiento${mesFiltro?'_'+mesFiltro:''}.pdf`);
+}
 export function exportResenasExcel(){
   if(!ensureXLSX())return;
   const list=registros.slice().sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''));
@@ -172,7 +275,7 @@ export function exportMantencionesExcel(){
 /* Ranking ejecutivo: mejores notas promedio de calidad de fotos (histórico, todo el equipo) */
 export function rankingTopFotografia(){
   const porTecnico={};
-  evaluacionesFotos.filter(e=>e.nivel).forEach(e=>{
+  evaluacionesFotos.filter(e=>e.nivel&&evalFotosOT[e.ot]?.clasificacionContenido==='redes').forEach(e=>{
     if(!porTecnico[e.persona])porTecnico[e.persona]={sum:0,n:0};
     porTecnico[e.persona].sum+=e.nivel;porTecnico[e.persona].n++;
   });

@@ -62,12 +62,30 @@ export function rowUnidad(u){return{
   kmi:u.kmi,kmf:u.kmf,total:u.total,comb:u.comb,recarga:u.recarga,monto:u.monto,pago:u.pago,
   i1:u.i1,i2:u.i2,i3:u.i3,i4:u.i4,
   creado_por:u.creadoPor||null,foto_path:u.fotoPath||null,
-  foto_kmi_path:u.fotoKmiPath||null,foto_kmf_path:u.fotoKmfPath||null
+  foto_kmi_path:u.fotoKmiPath||null,foto_kmf_path:u.fotoKmfPath||null,
+  tipo:u.tipo||null,fotos_km:u.fotosKm||[]
 };}
 export async function dbUpsertUnidad(u){
   if(!sbReady())return false;
-  try{const{error}=await sb.from('rolzzo_unidades').upsert([rowUnidad(u)]);if(error)throw error;return true;}
-  catch(e){dbError('registro de unidad',e);return false;}
+  try{
+    const{error}=await sb.from('rolzzo_unidades').upsert([rowUnidad(u)]);
+    if(error){
+      /* Si la tabla todavía no tiene las columnas 'tipo' / 'fotos_km'
+         (falta correr la migración SQL), no se pierde el resto del
+         registro: se reintenta sin esos dos campos, igual que se hace
+         con 'detalle' en vehículos. */
+      const msg=(error.message||'').toLowerCase();
+      if(msg.includes('tipo')||msg.includes('fotos_km')||msg.includes('column')){
+        const fallback=rowUnidad(u);
+        delete fallback.tipo;delete fallback.fotos_km;
+        const r2=await sb.from('rolzzo_unidades').upsert([fallback]);
+        if(r2.error)throw r2.error;
+        return true;
+      }
+      throw error;
+    }
+    return true;
+  }catch(e){dbError('registro de unidad',e);return false;}
 }
 export async function dbDeleteUnidad(id){
   if(!sbReady())return;
@@ -90,7 +108,7 @@ export async function dbDeleteEvalFoto(id){
 export function rowVehiculo(patente){
   const vd=ensureVehData(patente);
   return{patente,estado:vd.estado||'Operativo',aceite:vd.aceite||{},revision:vd.revision||{},
-    items:vd.items||[],reglas_mant:vd.reglasMant||[]};
+    items:vd.items||[],reglas_mant:vd.reglasMant||[],pendientes:vd.pendientes||[],detalle:vd.detalle||''};
 }
 /* Guardado puntual para un vehículo (incluye sus reglas de mantención y los
    documentos propios de cada regla, que viven dentro de reglas_mant). Antes
@@ -99,8 +117,24 @@ export function rowVehiculo(patente){
    vehículo o de otro usuario si ambos guardaban casi al mismo tiempo. */
 export async function dbUpsertVehiculo(patente){
   if(!sbReady())return false;
-  try{const{error}=await sb.from('rolzzo_vehiculos').upsert([rowVehiculo(patente)],{onConflict:'patente'});if(error)throw error;return true;}
-  catch(e){dbError('datos del vehículo',e);return false;}
+  try{
+    const{error}=await sb.from('rolzzo_vehiculos').upsert([rowVehiculo(patente)],{onConflict:'patente'});
+    if(error){
+      /* Si la tabla todavía no tiene la columna 'detalle' (proyecto sin esa
+         migración), no se pierde el resto del guardado: se reintenta sin
+         ese campo, igual que se hace con documentos de vehículo. */
+      const msg=(error.message||'').toLowerCase();
+      if(msg.includes('detalle')||msg.includes('column')){
+        const fallback=rowVehiculo(patente);
+        delete fallback.detalle;
+        const r2=await sb.from('rolzzo_vehiculos').upsert([fallback],{onConflict:'patente'});
+        if(r2.error)throw r2.error;
+        return true;
+      }
+      throw error;
+    }
+    return true;
+  }catch(e){dbError('datos del vehículo',e);return false;}
 }
 export async function dbDeleteVehiculo(patente){
   if(!sbReady())return false;
@@ -241,7 +275,8 @@ export async function loadAll(){
       id:u.id,fecha:u.fecha,mes:u.mes,conductor:u.conductor,patente:u.patente,
       kmi:u.kmi,kmf:u.kmf,total:u.total,comb:u.comb,recarga:u.recarga,monto:u.monto,pago:u.pago,
       i1:u.i1,i2:u.i2,i3:u.i3,i4:u.i4,
-      creadoPor:u.creado_por,fotoPath:u.foto_path,fotoKmiPath:u.foto_kmi_path,fotoKmfPath:u.foto_kmf_path
+      creadoPor:u.creado_por,fotoPath:u.foto_path,fotoKmiPath:u.foto_kmi_path,fotoKmfPath:u.foto_kmf_path,
+      tipo:u.tipo||'',fotosKm:u.fotos_km||[]
     })));
   }catch(e){console.error('Error cargando unidades:',e);}
 
@@ -276,7 +311,7 @@ export async function loadAll(){
     if(vData){
       __set_vehiculoData({});
       vData.forEach(v=>{
-        vehiculoData[v.patente]={estado:v.estado,aceite:v.aceite||{},revision:v.revision||{},items:v.items||[],documentos:[],reglasMant:v.reglas_mant||[]};
+        vehiculoData[v.patente]={estado:v.estado,aceite:v.aceite||{},revision:v.revision||{},items:v.items||[],documentos:[],reglasMant:v.reglas_mant||[],pendientes:v.pendientes||[],detalle:v.detalle||''};
       });
       (vdocData||[]).forEach(d=>{
         if(vehiculoData[d.patente]){

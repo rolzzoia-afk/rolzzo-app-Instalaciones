@@ -5,7 +5,8 @@ import { escapeHtml, formatFecha, formatFechaHora, isAdminUser, safeId } from '.
 import { clsToRGB, pdfCheckPageBreak, pdfDrawHeader, pdfDrawTitleBlock, pdfSectionBar } from './evaluaciones-pdf.js';
 import { g } from './form-helpers.js';
 import { ensureVehData, kmActualVeh } from './mantenciones-vehiculos.js';
-import { setEstadoVehiculo } from './periodo-helpers.js';
+import { flashGuardado, setEstadoVehiculo } from './periodo-helpers.js';
+import { renderPendFab } from './pendientes-vehiculo.js';
 import { guardar, mostrarToastBar } from './registro-adjuntos.js';
 import { addMantNombreQuick, closeMantDetalleModal, currentUserName, unidadFotoUrl } from './reportes-unidad.js';
 import { abrirSelectorArchivo, comprimirImagenSiHaceFalta, pdfAddPhotosPage } from './selector-foto-galeria.js';
@@ -111,27 +112,30 @@ export function verDetalleDocumentoVehiculo(idx){
   g('mant-detalle-modal-body').innerHTML=html;
   g('mant-detail-modal').style.display='flex';
 }
-/* ---------- Pantalla de Mantenciones: 2 paneles colapsables ----------
-   1) Documentos del vehículo: cualquier documento suelto (permiso, seguro,
-      boletas, etc.), sin asociarlo a una mantención específica.
-   2) Ingreso de mantención: elegir qué mantención es (dropdown), poner
-      fecha/km/detalle y adjuntar su respaldo — esto es lo que alimenta el
-      semáforo de Estado de Flota.
-   Ambos empiezan CERRADOS: al tocar el encabezado se despliegan. Sin
-   listas de historial ni semáforos en esta pantalla — eso vive en Estado
-   de Flota y en Reportes. */
-export let mantPanelOpen={docs:false,ingreso:false};
-export function toggleMantPanel(panel){
-  mantPanelOpen[panel]=!mantPanelOpen[panel];
+/* ---------- Pantalla de Mantenciones: una sola sección ----------
+   Antes había 2 paneles separados ("Documentos del vehículo" e "Ingreso de
+   mantención"); se unificaron en un solo panel "Mantenciones" para que
+   cualquier foto o documento del vehículo — sea de una mantención oficial
+   con seguimiento de km, o algo suelto (reparación puntual, permiso, etc.) —
+   se cargue desde el mismo lugar. Dentro conviven dos bloques:
+   1) Mantención oficial (con seguimiento de km): dropdown de nombre + fecha/
+      km/detalle + adjuntos — esto es lo que alimenta el semáforo de Estado
+      de Flota.
+   2) Otras mantenciones y documentos: nombre libre + fecha + detalle +
+      adjuntos, para todo lo que no es una mantención periódica oficial
+      (reparaciones puntuales, permisos, boletas, etc.) — vive en
+      vehiculoData[patente].items.
+   Empieza CERRADO: al tocar el encabezado se despliega. */
+export let mantPanelOpen=false;
+export function toggleMantPanel(){
+  mantPanelOpen=!mantPanelOpen;
   renderMantDetail();
 }
-/* Tipo de documento elegido en el dropdown de "Documentos del vehículo"
-   (Permiso de Circulación, SOAP, Seguro, etc.) — se guarda en memoria para
-   que no se pierda al re-renderizar mientras la persona sigue eligiendo
-   archivos. La lista de documentos ya guardados vive en un sub-panel aparte
-   y cerrado por defecto, para que la zona de carga siempre se vea vacía
-   apenas se guarda (y quede lista para el siguiente documento). */
-export let vehDocTipoSel=null;
+/* "Documentos antiguos" (vehiculoData[patente].documentos): documentos
+   sueltos cargados con el flujo anterior. Ya no se pueden agregar nuevos
+   por ahí (reemplazado por "Otras mantenciones y documentos" arriba), pero
+   se mantiene la vista de solo lectura + eliminar por si quedó algo
+   cargado con el flujo viejo. */
 export let verDocsGuardados=false;
 export function toggleVerDocsGuardados(){
   verDocsGuardados=!verDocsGuardados;
@@ -145,9 +149,13 @@ export function renderMantDetail(){
   const sid=safeId(patente);
   const pSafe=patente.replace(/'/g,"\\'");
   const km=kmActualVeh(patente);
-  const docs=vd.documentos||[];
+  const docsAntiguos=vd.documentos||[];
+  const totalCargado=(vd.reglasMant||[]).reduce((n,r)=>n+((r.documentos||[]).length),0)
+    +(vd.items||[]).reduce((n,it)=>n+((it.documentos||[]).length),0)
+    +docsAntiguos.length;
 
   el.innerHTML=`
+  <datalist id="mei-sugerencias">${[...(lists.mantNombres||[]),...(lists.docTypes||[])].map(n=>`<option value="${escapeHtml(n)}">`).join('')}</datalist>
   <div class="card" style="--sec-color:#eda100">
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:.4rem">
       <p class="card-title" style="margin:0;padding:0;border:none"><i class="ti ti-car" aria-hidden="true"></i>${escapeHtml(patente)}</p>
@@ -160,40 +168,49 @@ export function renderMantDetail(){
         </select>
       </div>
     </div>
-    <p style="font-size:11.5px;color:var(--text-muted);margin:0">Kilometraje actual (según Unidad → Registro): <b>${km!==null?km.toLocaleString('es-CL')+' km':'Sin registros'}</b></p>
+    <p style="font-size:11.5px;color:var(--text-muted);margin:0 0 .9rem">Kilometraje actual (según Unidad → Registro): <b>${km!==null?km.toLocaleString('es-CL')+' km':'Sin registros'}</b></p>
+    <div class="field" style="margin:0">
+      <label>Datos del vehículo</label>
+      <textarea id="veh-detalle-${sid}" rows="2" placeholder="Ej: Marca, modelo, año, N° de chasis, u otras especificaciones y notas generales del vehículo...">${escapeHtml(vd.detalle||'')}</textarea>
+    </div>
+    <button class="btn-sec btn-sm" id="veh-detalle-btn-${sid}" style="margin-top:.6rem" onclick="guardarDetalleVehiculo('${sid}')"><i class="ti ti-device-floppy" aria-hidden="true"></i>Guardar datos del vehículo</button>
   </div>
 
   <div class="card" style="--sec-color:#eda100;padding:0;overflow:hidden">
-    <div class="mant-panel-head" onclick="toggleMantPanel('docs')">
-      <span><i class="ti ti-folder" aria-hidden="true"></i>Documentos del vehículo<span class="mant-panel-count">${docs.length}</span></span>
-      <i class="sub-chevron ${mantPanelOpen.docs?'open':''}" aria-hidden="true"></i>
+    <div class="mant-panel-head" onclick="toggleMantPanel()">
+      <span><i class="ti ti-tool" aria-hidden="true"></i>Mantenciones<span class="mant-panel-count">${totalCargado}</span></span>
+      <i class="sub-chevron ${mantPanelOpen?'open':''}" aria-hidden="true"></i>
     </div>
-    ${mantPanelOpen.docs?`<div class="mant-panel-body">
-      <div class="field" style="margin-bottom:.8rem">
-        <label>Tipo de documento</label>
-        <select id="vehdoc-tipo-${sid}">
-          ${(lists.docTypes||[]).map(t=>`<option value="${escapeHtml(t)}" ${t===vehDocTipoSel?'selected':''}>${escapeHtml(t)}</option>`).join('')}
-        </select>
-      </div>
-      ${renderBarraAdjuntos('vehdoc_'+sid)}
-      <button class="btn" style="margin-top:1rem;width:100%;justify-content:center" onclick="guardarDocumentosVehiculo('${sid}')"><i class="ti ti-device-floppy" aria-hidden="true"></i>Guardar documentos</button>
-      <div class="sub-accordion-simple" style="margin-top:1.1rem">
+    ${mantPanelOpen?`<div class="mant-panel-body">
+      <p class="sec-lbl">Mantención oficial (con seguimiento de kilometraje)</p>
+      ${renderIngresoMantencion(patente,sid)}
+      <hr class="sep">
+      <p class="sec-lbl">Otras mantenciones y documentos</p>
+      ${renderItemsExtra(patente,sid)}
+      ${docsAntiguos.length?`
+      <hr class="sep">
+      <div class="sub-accordion-simple">
         <div class="sub-accordion-simple-head" onclick="toggleVerDocsGuardados()">
-          <span><i class="ti ti-eye" aria-hidden="true"></i>Ver documentos ya cargados<span class="mant-panel-count">${docs.length}</span></span>
+          <span><i class="ti ti-folder" aria-hidden="true"></i>Documentos antiguos<span class="mant-panel-count">${docsAntiguos.length}</span></span>
           <i class="sub-chevron ${verDocsGuardados?'open':''}" aria-hidden="true"></i>
         </div>
-        ${verDocsGuardados?`<div class="sub-accordion-simple-body"><div id="mant-docs-list-${sid}">${renderDocsList(patente)}</div></div>`:''}
-      </div>
+        ${verDocsGuardados?`<div class="sub-accordion-simple-body">${renderDocsList(patente)}</div>`:''}
+      </div>`:''}
     </div>`:''}
-  </div>
-
-  <div class="card" style="--sec-color:#eda100;padding:0;overflow:hidden">
-    <div class="mant-panel-head" onclick="toggleMantPanel('ingreso')">
-      <span><i class="ti ti-tool" aria-hidden="true"></i>Ingreso de mantención</span>
-      <i class="sub-chevron ${mantPanelOpen.ingreso?'open':''}" aria-hidden="true"></i>
-    </div>
-    ${mantPanelOpen.ingreso?`<div class="mant-panel-body">${renderIngresoMantencion(patente,sid)}</div>`:''}
   </div>`;
+  renderPendFab();
+}
+export async function guardarDetalleVehiculo(sid){
+  const patente=mantSelected;
+  if(!patente)return;
+  const el=g('veh-detalle-'+sid);
+  if(!el)return;
+  const vd=ensureVehData(patente);
+  const prev=vd.detalle;
+  vd.detalle=el.value;
+  const ok=await dbUpsertVehiculo(patente);
+  if(!ok){vd.detalle=prev;return;}
+  flashGuardado(g('veh-detalle-btn-'+sid));
 }
 /* Bloque "Ingreso de mantención": dropdown de nombre + fecha/km/detalle +
    adjuntos. Si el nombre elegido ya tiene un registro guardado y quien
@@ -226,6 +243,12 @@ export function renderIngresoMantencion(patente,sid){
     if(regla.documentos&&regla.documentos.length){
       html+=`<p class="sec-lbl" style="margin-bottom:.4rem">Documento cargado</p>${renderMantFormDocs(patente,regla)}`;
     }
+    /* La corrección de fecha/km/detalle sigue reservada a un administrador,
+       pero cualquiera puede seguir adjuntando respaldo adicional (boletas,
+       fotos, etc.) aunque la mantención ya esté registrada. */
+    html+=`<p class="sec-lbl" style="margin:.9rem 0 .4rem">Agregar más documentos</p>
+      <div>${renderBarraAdjuntos('mantadd_'+fid)}</div>
+      <button class="btn" style="margin-top:1rem;width:100%;justify-content:center" onclick="agregarDocumentosIngresoMantencion('${patente.replace(/'/g,"\\'")}','${fid}','${regla.id}')"><i class="ti ti-paperclip" aria-hidden="true"></i>Agregar documentos</button>`;
     return html;
   }
   const intervaloKmPreview=params?(params.modo==='km'?params.intervaloKm:0):((regla&&regla.intervaloKm)||0);
@@ -324,6 +347,30 @@ export async function guardarIngresoMantencion(patente,fid,nombre){
   renderMantDetail();
   renderEstadoFlota&&renderEstadoFlota();
 }
+/* Permite agregar más documentos a una mantención que ya fue registrada,
+   sin tocar fecha/km/detalle/comentario (esos siguen reservados a un
+   administrador vía guardarIngresoMantencion). A diferencia de esa función,
+   esta NO exige ser admin: cualquiera puede seguir adjuntando respaldo. */
+export async function agregarDocumentosIngresoMantencion(patente,fid,reglaId){
+  const vd=ensureVehData(patente);
+  const regla=(vd.reglasMant||[]).find(r=>r.id===reglaId);
+  if(!regla)return;
+  const colaId='mantadd_'+fid;
+  const pendientes=adjPendientes[colaId]||[];
+  if(!pendientes.length){
+    alert('No hay ningún archivo elegido todavía. Toca el recuadro para elegir cámara, galería o escanear.');
+    return;
+  }
+  if(!regla.documentos)regla.documentos=[];
+  const subidos=await subirArchivosACola(patente,pendientes,regla.desc,regla.documentos);
+  if(!subidos){renderMantDetail();return;}
+  const ok=await dbUpsertVehiculo(patente);
+  if(!ok){alert('No se pudo guardar en la base de datos. Intenta nuevamente.');return;}
+  limpiarAdjPendientes(colaId);
+  mostrarToastBar('Documento agregado con éxito');
+  renderMantDetail();
+  renderEstadoFlota&&renderEstadoFlota();
+}
 /* Sube una lista de archivos (File[]) al bucket y los agrega al array
    destino, devolviendo cuántos se subieron con éxito. Usado tanto por
    "Documentos del vehículo" como por "Ingreso de mantención". */
@@ -348,30 +395,6 @@ export async function subirArchivosACola(patente,files,tipo,destinoArray){
   if(fallidos.length)alert('Algunos archivos no se pudieron subir:\n'+fallidos.join('\n'));
   return subidos;
 }
-/* Guarda el bloque "Documentos del vehículo": sube todos los archivos
-   pendientes de su cola como documentos sueltos (no asociados a una
-   mantención específica). */
-export async function guardarDocumentosVehiculo(sid){
-  const patente=mantSelected;
-  if(!patente)return;
-  const colaId='vehdoc_'+sid;
-  const pendientes=adjPendientes[colaId]||[];
-  if(!pendientes.length){
-    alert('No hay ningún archivo elegido todavía. Toca el recuadro para elegir cámara, galería o escanear.');
-    return;
-  }
-  const tipoEl=g('vehdoc-tipo-'+sid);
-  const tipo=(tipoEl&&tipoEl.value)||(lists.docTypes&&lists.docTypes[0])||'Documento';
-  vehDocTipoSel=tipo;
-  const vd=ensureVehData(patente);
-  const subidos=await subirArchivosACola(patente,pendientes,tipo,vd.documentos);
-  if(!subidos){renderMantDetail();return;}
-  const ok=await dbUpsertVehiculo(patente);
-  if(!ok){alert('No se pudo guardar en la base de datos. Intenta nuevamente.');return;}
-  limpiarAdjPendientes(colaId);
-  mostrarToastBar('Documentos guardados con éxito');
-  renderMantDetail();
-}
 export function descargarDocumentoVehiculo(id,nombreArchivo){
   if(!sbReady())return;
   let path=null;
@@ -390,10 +413,11 @@ export async function eliminarDocumentoVehiculo(patente,id){
   if(doc&&doc.storagePath&&sb)sb.storage.from('vehiculo-documentos').remove([doc.storagePath]).catch(()=>{});
   renderMantDetail();
 }
-export function renderMantFormDocs(patente,regla){
-  const docs=regla.documentos||[];
-  if(!docs.length)return '<p class="eval-empty">Sin documentos cargados para esta mantención.</p>';
+export function renderMantFormDocs(patente,entidad,kind){
+  const docs=entidad.documentos||[];
+  if(!docs.length)return '<p class="eval-empty">Sin documentos cargados.</p>';
   const admin=isAdminUser();
+  const delFn=kind==='item'?'eliminarDocumentoItemExtra':'eliminarDocumentoMantForm';
   return `<div class="ef-fotos-grid">`+docs.slice().sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')).map(d=>{
     const url=d.storagePath?unidadFotoUrl(d.storagePath):'';
     const esImagen=(d.mimeType||'').startsWith('image/');
@@ -409,7 +433,7 @@ export function renderMantFormDocs(patente,regla){
     <div style="display:flex;gap:6px;padding:0 7px 7px">
       <button class="btn-sec btn-sm" style="flex:1" ${url?`onclick="window.open('${url}','_blank')"`:'disabled'}><i class="ti ti-eye" aria-hidden="true"></i> Ver</button>
       <button class="btn-sec btn-sm" style="flex:1" onclick="descargarDocumentoVehiculo('${d.id}','${escapeHtml(d.nombreArchivo)}')"><i class="ti ti-download" aria-hidden="true"></i></button>
-      ${admin?`<button class="btn-del" style="display:inline-flex" onclick="eliminarDocumentoMantForm('${patente.replace(/'/g,"\\'")}','${regla.id}','${d.id}')"><i class="ti ti-trash" aria-hidden="true"></i></button>`:''}
+      ${admin?`<button class="btn-del" style="display:inline-flex" onclick="${delFn}('${patente.replace(/'/g,"\\'")}','${entidad.id}','${d.id}')"><i class="ti ti-trash" aria-hidden="true"></i></button>`:''}
     </div>
   </div>`;}).join('')+`</div>`;
 }
@@ -427,103 +451,90 @@ export async function eliminarDocumentoMantForm(patente,reglaId,docId){
   if(doc&&doc.storagePath&&sb)sb.storage.from('vehiculo-documentos').remove([doc.storagePath]).catch(()=>{});
   renderMantDetail();
 }
+export async function eliminarDocumentoItemExtra(patente,itemId,docId){
+  if(!isAdminUser()){alert('Solo un administrador puede eliminar un documento ya cargado.');return;}
+  if(!confirm('¿Eliminar este documento?'))return;
+  const vd=ensureVehData(patente);
+  const item=(vd.items||[]).find(x=>x.id===itemId);
+  if(!item)return;
+  const doc=(item.documentos||[]).find(d=>String(d.id)===String(docId));
+  const prevDocs=(item.documentos||[]).slice();
+  item.documentos=(item.documentos||[]).filter(d=>String(d.id)!==String(docId));
+  const ok=await dbUpsertVehiculo(patente);
+  if(!ok){item.documentos=prevDocs;return;}
+  if(doc&&doc.storagePath&&sb)sb.storage.from('vehiculo-documentos').remove([doc.storagePath]).catch(()=>{});
+  renderMantDetail();
+}
+/* "Otras mantenciones y documentos": reemplaza al antiguo panel separado
+   "Documentos del vehículo". Nombre libre (con sugerencias de mantNombres +
+   docTypes vía <datalist>) + fecha + detalle + adjuntos, para todo lo que no
+   es una mantención periódica oficial: reparaciones puntuales, permisos,
+   boletas, etc. Usa la misma cola de adjuntos (adjPendientes) y el mismo
+   dropzone que el resto de la app, y guarda los documentos con la misma
+   forma que regla.documentos para poder reusar renderMantFormDocs. */
 export function renderItemsExtra(patente,sid){
   const vd=ensureVehData(patente);
-  const items=vd.items||[];
+  const items=(vd.items||[]).slice().sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
   const pSafe=patente.replace(/'/g,"\\'");
   let html='';
   if(items.length){
-    html+=items.slice().sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')).map(it=>{
-      const archivos=(it.archivos&&it.archivos.length)?it.archivos:(it.fotoPath?[{path:it.fotoPath,nombre:it.nombre||'Foto'}]:[]);
-      const galeria=archivos.length?`<div class="ef-fotos-grid" style="margin-top:.5rem">`+archivos.map((a,ai)=>{
-        const url=unidadFotoUrl(a.path);
-        const esImg=/\.(jpe?g|png|webp)$/i.test(a.nombre||'');
-        const media=esImg?`<img src="${url}" alt="${escapeHtml(a.nombre||'')}" onclick="${url?`window.open('${url}','_blank')`:''}">`:`<div class="ef-foto-ph" onclick="${url?`window.open('${url}','_blank')`:''}"><i class="ti ti-file-type-pdf" aria-hidden="true"></i></div>`;
-        return `<div class="ef-foto-card">${media}<div class="ef-foto-meta"><span class="ef-foto-name" title="${escapeHtml(a.nombre||'')}">${escapeHtml(a.nombre||'')}</span></div><div style="display:flex;gap:6px;padding:0 7px 7px">
-          <button class="btn-sec btn-sm" style="flex:1" ${url?`onclick="window.open('${url}','_blank')"`:'disabled'}><i class="ti ti-eye" aria-hidden="true"></i> Ver</button>
-          <button class="btn-del" onclick="removeItemExtraArchivo('${pSafe}','${it.id}',${ai})" title="Quitar archivo"><i class="ti ti-trash" aria-hidden="true"></i></button>
-        </div></div>`;
-      }).join('')+`</div>`:'';
-      return `
+    html+=items.map(it=>`
     <div class="eval-section">
       <div class="eval-section-head">
         <span class="eval-section-title">${escapeHtml(it.nombre)}<span class="eval-section-date">${it.fecha?formatFecha(it.fecha):''}</span></span>
-        <button class="btn-del" onclick="removeItemExtra('${pSafe}','${it.id}')" title="Quitar"><i class="ti ti-trash" aria-hidden="true"></i></button>
+        <button class="btn-del" onclick="removeItemExtra('${pSafe}','${it.id}')" title="Eliminar"><i class="ti ti-trash" aria-hidden="true"></i></button>
       </div>
-      ${it.detalle?`<p style="font-size:11.5px;color:var(--text-secondary)">${escapeHtml(it.detalle)}</p>`:''}
-      ${galeria}
-    </div>`;
-    }).join('');
+      ${it.detalle?`<p style="font-size:11.5px;color:var(--text-secondary);white-space:pre-wrap">${escapeHtml(it.detalle)}</p>`:''}
+      ${renderMantFormDocs(patente,it,'item')}
+    </div>`).join('');
   }else{
-    html+='<p class="eval-empty">Sin otras mantenciones registradas.</p>';
+    html+='<p class="eval-empty">Sin otras mantenciones ni documentos registrados todavía.</p>';
   }
   html+=`
   <div class="fg" style="margin-top:.8rem">
-    <div class="field"><label>Nombre (ej: Cambio de neumáticos)</label><input type="text" id="mei-nombre-${sid}" placeholder="Nombre de la mantención"></div>
+    <div class="field"><label>Nombre</label><input type="text" id="mei-nombre-${sid}" list="mei-sugerencias" placeholder="Ej: Reparación de cableado, Permiso de circulación..."></div>
     <div class="field"><label>Fecha</label><input type="date" id="mei-fecha-${sid}"></div>
   </div>
-  <div class="fg" style="margin-top:.5rem">
-    <div class="field"><label>Detalle (opcional)</label><input type="text" id="mei-detalle-${sid}" placeholder="Detalle adicional"></div>
-    <div class="field"><label>Fotos o documentos (uno o varios)</label><input type="file" id="mei-foto-${sid}" accept=".jpg,.jpeg,.png,.webp,.pdf" multiple style="text-transform:none" data-filesrc="Elegir archivo(s)"></div>
-  </div>
-  <button class="btn btn-sm" style="margin-top:.7rem" onclick="addItemExtra('${pSafe}','${sid}')"><i class="ti ti-plus" aria-hidden="true"></i>Agregar mantención</button>`;
+  <div class="field" style="margin-top:.5rem"><label>Detalle (opcional)</label><textarea id="mei-detalle-${sid}" rows="2" placeholder="Costo, taller, observaciones..."></textarea></div>
+  <div style="margin-top:.7rem">${renderBarraAdjuntos('itemadd_'+sid)}</div>
+  <button class="btn btn-sm" style="margin-top:.7rem" onclick="addItemExtra('${pSafe}','${sid}')"><i class="ti ti-plus" aria-hidden="true"></i>Agregar</button>`;
   return html;
 }
 export async function addItemExtra(patente,sid){
   const nombre=g('mei-nombre-'+sid).value.trim();
   const fecha=g('mei-fecha-'+sid).value;
   const detalle=g('mei-detalle-'+sid).value.trim();
-  if(!nombre){alert('Ponle un nombre a la mantención (ej: Cambio de neumáticos).');return;}
+  if(!nombre){alert('Ponle un nombre (ej: Reparación de cableado, Permiso de circulación...).');return;}
+  if(!fecha){alert('Falta indicar la fecha.');return;}
   const vd=ensureVehData(patente);
   if(!vd.items)vd.items=[];
-  const item={id:Date.now()+'_'+Math.random().toString(36).slice(2,6),nombre,fecha,detalle,fotoPath:null,archivos:[]};
-  const fileInput=g('mei-foto-'+sid);
-  const files=fileInput?Array.from(fileInput.files||[]):[];
-  for(let file of files){
-    if(file.size>15*1024*1024){alert('El archivo "'+file.name+'" supera 15MB y no se subirá.');continue;}
-    if(!sbReady())continue;
-    file=await comprimirImagenSiHaceFalta(file);
-    const archId=Date.now()+'_'+Math.random().toString(36).slice(2,6);
-    const path='unidades/'+String(patente||'SIN_PATENTE').replace(/[^a-zA-Z0-9]/g,'_')+'/mant_'+archId+'_'+file.name;
-    try{
-      const{error}=await sb.storage.from('vehiculo-documentos').upload(path,file);
-      if(error)throw error;
-      item.archivos.push({path,nombre:file.name});
-    }catch(err){
-      alert('No se pudo subir "'+file.name+'": '+((err&&err.message)||'intenta de nuevo.'));
-    }
-  }
+  const item={id:Date.now()+'_'+Math.random().toString(36).slice(2,6),nombre,fecha,detalle,documentos:[],creadoPor:currentUserName(),creadoEn:new Date().toISOString()};
+  const colaId='itemadd_'+sid;
+  const pendientes=adjPendientes[colaId]||[];
+  await subirArchivosACola(patente,pendientes,nombre,item.documentos);
   vd.items.push(item);
   const ok=await dbUpsertVehiculo(patente);
   if(!ok){
     vd.items=vd.items.filter(x=>x.id!==item.id);
     return;
   }
-  renderMantDetail();
-}
-export async function removeItemExtraArchivo(patente,itemId,archivoIdx){
-  if(!confirm('¿Quitar este archivo de la mantención?'))return;
-  const vd=ensureVehData(patente);
-  const item=(vd.items||[]).find(x=>x.id===itemId);
-  if(!item)return;
-  const prevArchivos=(item.archivos||[]).slice();
-  if(item.archivos&&item.archivos.length>archivoIdx)item.archivos.splice(archivoIdx,1);
-  const ok=await dbUpsertVehiculo(patente);
-  if(!ok){
-    item.archivos=prevArchivos;
-    return;
-  }
+  limpiarAdjPendientes(colaId);
+  mostrarToastBar('Registro agregado con éxito');
   renderMantDetail();
 }
 export async function removeItemExtra(patente,id){
-  if(!confirm('¿Eliminar esta mantención?'))return;
+  if(!confirm('¿Eliminar este registro?'))return;
   const vd=ensureVehData(patente);
   const prevItems=(vd.items||[]).slice();
+  const item=(vd.items||[]).find(x=>x.id===id);
   vd.items=(vd.items||[]).filter(x=>x.id!==id);
   const ok=await dbUpsertVehiculo(patente);
   if(!ok){
     vd.items=prevItems;
     return;
+  }
+  if(item&&item.documentos&&item.documentos.length&&sb){
+    item.documentos.forEach(d=>{if(d.storagePath)sb.storage.from('vehiculo-documentos').remove([d.storagePath]).catch(()=>{});});
   }
   renderMantDetail();
 }
@@ -589,11 +600,12 @@ export function buildVehiculoPDFBlock(doc,y,patente,esPrimeraEnPagina){
 
   const items=vd.items||[];
   if(items.length){
-    y=pdfSectionBar(doc,y,marginX,pageW,'OTRAS MANTENCIONES REGISTRADAS',[100,116,139]);
+    y=pdfSectionBar(doc,y,marginX,pageW,'OTRAS MANTENCIONES Y DOCUMENTOS',[100,116,139]);
     doc.setFont('helvetica','normal');doc.setFontSize(8.5);
     items.forEach(it=>{
       y=pdfCheckPageBreak(doc,y,18);
-      const txt=`•  ${it.nombre} — ${it.fecha?formatFecha(it.fecha):'sin fecha'}${it.detalle?': '+it.detalle:''}`;
+      const nDocs=(it.documentos||[]).length;
+      const txt=`•  ${it.nombre} — ${it.fecha?formatFecha(it.fecha):'sin fecha'}${it.detalle?': '+it.detalle:''}${nDocs?' ('+nDocs+' doc. adjunto'+(nDocs===1?'':'s')+')':''}`;
       const lines=doc.splitTextToSize(txt,pageW-marginX*2);
       doc.text(lines,marginX,y);y+=lines.length*10+4;
     });
@@ -624,6 +636,17 @@ export function buildVehiculoPDFBlock(doc,y,patente,esPrimeraEnPagina){
   }
   return y+22;
 }
+/* Junta las fotos (imágenes, no PDFs) de "Otras mantenciones y documentos"
+   de un vehículo, para la página de fotos al final de su ficha en PDF. */
+function fotosDeItems(vd){
+  const fotos=[];
+  (vd.items||[]).forEach(it=>{
+    (it.documentos||[]).forEach(d=>{
+      if((d.mimeType||'').startsWith('image/'))fotos.push({url:unidadFotoUrl(d.storagePath),nombre:it.nombre||d.nombreArchivo||'Foto'});
+    });
+  });
+  return fotos;
+}
 export async function exportVehiculoPDF(patente){
   if(!window.jspdf){alert('No se pudo cargar el generador de PDF. Revisa tu conexión e intenta de nuevo.');return;}
   const{jsPDF}=window.jspdf;
@@ -635,7 +658,7 @@ export async function exportVehiculoPDF(patente){
   let y=pdfDrawTitleBlock(doc,pageW,marginX,'PATENTE '+patente,`Generado el ${new Date().toLocaleDateString('es-CL')}`);
   buildVehiculoPDFBlock(doc,y,patente,true);
   const vd=ensureVehData(patente);
-  const fotosMant=(vd.items||[]).filter(it=>it.fotoPath).map(it=>({url:unidadFotoUrl(it.fotoPath),nombre:it.nombre||'Mantención'}));
+  const fotosMant=fotosDeItems(vd);
   await pdfAddPhotosPage(doc,pageW,pageH,marginX,[{titulo:'PATENTE '+patente,fotos:fotosMant}]);
   doc.save(`Vehiculo_${safeId(patente)}.pdf`);
 }
@@ -652,7 +675,7 @@ export async function exportAllVehiculosPDF(){
   lists.vehiculos.forEach((p,i)=>{y=buildVehiculoPDFBlock(doc,y,p,i===0);});
   const grupos=lists.vehiculos.map(p=>{
     const vd=ensureVehData(p);
-    return{titulo:'PATENTE '+p,fotos:(vd.items||[]).filter(it=>it.fotoPath).map(it=>({url:unidadFotoUrl(it.fotoPath),nombre:it.nombre||'Mantención'}))};
+    return{titulo:'PATENTE '+p,fotos:fotosDeItems(vd)};
   });
   await pdfAddPhotosPage(doc,pageW,pageH,marginX,grupos);
   doc.save('Vehiculos_Todos.pdf');

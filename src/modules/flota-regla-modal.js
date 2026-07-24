@@ -130,6 +130,7 @@ export function renderMantenciones(){
   if(!lists.vehiculos.length){
     chipsEl.innerHTML=addPatenteChipBtn('mant');
     g('mant-detail').innerHTML='<div class="empty-s"><p style="font-size:13px">No hay vehículos cargados.</p><p style="font-size:12px">Agrégalos en Listas → Vehículos (patentes).</p></div>';
+    const fab=g('pend-fab');if(fab)fab.style.display='none';
     return;
   }
   if(!mantSelected||!lists.vehiculos.includes(mantSelected))__set_mantSelected(lists.vehiculos[0]);

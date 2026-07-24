@@ -2,6 +2,7 @@ import { sb } from './bootstrap.js';
 import { NAV_ITEMS, __set_currentTab, __set_navGroupOpen, __set_registros, __set_unidades, currentTab, navGroupOpen, otContext, personas, registros, session } from './core-data.js';
 import { renderDash, renderUniTable } from './dashboard-kpis.js';
 import { renderEstadoFlota } from './estado-flota.js';
+import { actualizarKmSugerido, renderUFotoKmDropzone, renderUTipoOptions } from './registro-adjuntos.js';
 import { __set_evaluacionesFotos, __set_evaluacionesNuevo, loadEvalFotosOT } from './evaluaciones.js';
 import { __set_efAcordeonOtAbierta, __set_segResenaOtActiva, renderEvalFotos, renderEvalNuevo, renderSegResenas } from './evaluaciones-extra.js';
 import { renderSegReportes } from './exportacion-excel.js';
@@ -129,7 +130,7 @@ export function sw(t){
   if(t==='regnew')renderFotografosRows();
   if(t==='reg_formulario')finstInitPane();
   if(t==='dash')renderDash();
-  if(t==='unireg'){renderUniregChips();renderUniTable();}
+  if(t==='unireg'){renderUniregChips();renderUniTable();actualizarKmSugerido();renderUTipoOptions();renderUFotoKmDropzone();}
   if(t==='unimant')renderMantenciones();
   if(t==='uniflota')renderEstadoFlota();
   if(t==='unirep')renderReportes();

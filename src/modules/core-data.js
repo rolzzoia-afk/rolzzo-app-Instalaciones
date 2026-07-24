@@ -68,7 +68,7 @@ export const DEFAULT_LISTS={
   queSoluciono:['— NO APLICA —','OTRO','PERFIL BASE','CAMBIO DE LADO DE MECANISMO CENEFA OVALADA','CAMBIO DE SENTIDO-ARMADO','CUCHILLA TELA'],
   traslados:['NO APLICA','30 MIN','1 HORA','1 HORA Y MEDIA','2 HORAS','2 HORAS Y MEDIA','MÁS DE 3 HORAS'],
   docTypes:['Permiso de Circulación','Revisión Técnica (certificado)','SOAP','Seguro (póliza)','Certificado de Homologación de Gases','Padrón / Certificado de Inscripción','Factura de compra','Contrato de Leasing','Factura de mantención / repuestos','Comprobante de pago de multas','Otro'],
-  mantNombres:['Cambio de Aceite','Cambio de Filtro de Aceite','Filtro de Aire Acondicionado','Cambio de Aceite de Caja','Cambio de Bujías','Mantención de Frenos','Alineación, Balanceo y Amortiguadores','Revisión Técnica','Fluidos - Refrigerante','Fluidos - Líquido de Freno','Fluidos - Agua Parabrisas'],
+  mantNombres:['Cambio de Aceite','Cambio de Filtro de Aceite','Cambio de Filtro de Aire Motor','Filtro de Aire Acondicionado','Cambio de Aceite de Caja','Cambio de Bujías','Mantención de Frenos','Alineación, Balanceo y Amortiguadores','Revisión Técnica','Fluidos - Refrigerante','Fluidos - Líquido de Freno','Fluidos - Agua Parabrisas'],
   formasPago:['COPEC','TRANSFERENCIA','EFECTIVO'],
   combustibles:['FULL','MEDIO','BAJO']
 };
@@ -97,6 +97,7 @@ export const CAT_META={
 export const MANT_PARAMS={
   'Cambio de Aceite':{modo:'km',intervaloKm:9000},
   'Cambio de Filtro de Aceite':{modo:'km',intervaloKm:18000},
+  'Cambio de Filtro de Aire Motor':{modo:'km',intervaloKm:15000},
   'Filtro de Aire Acondicionado':{modo:'km',intervaloKm:20000},
   'Cambio de Aceite de Caja':{modo:'km',intervaloKm:30000},
   'Cambio de Bujías':{modo:'km',intervaloKm:30000},

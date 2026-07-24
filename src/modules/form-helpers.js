@@ -151,7 +151,6 @@ export function populateForms(){
   if(filTec){const cur=filTec.value;filTec.innerHTML='<option value="">Todos</option>';tecs.forEach(t=>{const o=document.createElement('option');o.value=t;o.textContent=t;filTec.appendChild(o);});filTec.value=cur;}
   const filMes=g('fil-mes');
   if(filMes&&filMes.options.length<=1){MESES.forEach(m=>{const o=document.createElement('option');o.value=m;o.textContent=m;filMes.appendChild(o);});}
-  convertirInputFileConSelector('u-foto-kmi','Elegir foto');
-  convertirInputFileConSelector('u-foto-kmf','Elegir foto');
+  convertirInputFileConSelector('u-foto-km','Elegir foto');
   convertirInputFileConSelector('u-foto','Elegir foto');
 }

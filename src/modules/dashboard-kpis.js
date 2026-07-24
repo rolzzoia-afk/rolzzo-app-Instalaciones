@@ -241,7 +241,7 @@ export function renderUniTable(){
         <span class="reg-row-cliente">${u.total>0?u.total.toLocaleString('es-CL')+' km recorridos':'—'}</span>
         <span class="reg-row-badges">
           <span class="badge ${u.recarga==='SI'?'b-inst':'b-gar'}">${escapeHtml(u.comb||'—')}</span>
-          ${(u.fotoKmiPath&&u.fotoKmfPath)?'<span class="badge b-ok"><i class="ti ti-camera" aria-hidden="true"></i> Con fotos</span>':'<span class="badge b-err"><i class="ti ti-camera-off" aria-hidden="true"></i> Sin fotos</span>'}
+          ${(u.fotoKmiPath||u.fotoKmfPath||(u.fotosKm&&u.fotosKm.length))?'<span class="badge b-ok"><i class="ti ti-camera" aria-hidden="true"></i> Con fotos</span>':'<span class="badge b-err"><i class="ti ti-camera-off" aria-hidden="true"></i> Sin fotos</span>'}
         </span>
       </div>
       <div class="reg-row-actions">

@@ -1,6 +1,7 @@
 import { lists } from './core-data.js';
 import { renderUniTable } from './dashboard-kpis.js';
 import { g } from './form-helpers.js';
+import { actualizarKmSugerido } from './registro-adjuntos.js';
 import { addPatenteChipBtn } from './reportes-unidad.js';
 
 /* ===== REGISTRO DE UNIDAD: selector de patente arriba (pastillas) ===== */
@@ -16,4 +17,14 @@ export function renderUniregChips(){
   if(!uniregSelected||!lists.vehiculos.includes(uniregSelected))__set_uniregSelected(lists.vehiculos[0]);
   chipsEl.innerHTML=lists.vehiculos.map(p=>`<span class="patente-chip ${uniregSelected===p?'sel':''}" onclick="selectPatenteUnireg('${p.replace(/'/g,"\\'")}')">${p}</span>`).join('')+addPatenteChipBtn('reg');
 }
-export function selectPatenteUnireg(p){__set_uniregSelected(p);renderUniregChips();renderUniTable();}
+export function selectPatenteUnireg(p){
+  __set_uniregSelected(p);
+  renderUniregChips();
+  renderUniTable();
+  /* Se limpia el campo de kilometraje al cambiar de patente para que no
+     quede pegado el número de la patente anterior — cada patente sugiere
+     su propio último kilometraje. */
+  const kmEl=g('u-km');
+  if(kmEl)kmEl.value='';
+  actualizarKmSugerido();
+}

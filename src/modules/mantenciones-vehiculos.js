@@ -19,12 +19,14 @@ export function migrarAceiteRevisionARegla(vd){
   vd.aceite={};vd.revision={};
 }
 export function ensureVehData(patente){
-  if(!vehiculoData[patente])vehiculoData[patente]={estado:'Operativo',aceite:{},revision:{},documentos:[],detalle:'',reglasMant:[]};
+  if(!vehiculoData[patente])vehiculoData[patente]={estado:'Operativo',aceite:{},revision:{},documentos:[],detalle:'',reglasMant:[],pendientes:[],items:[]};
   if(!vehiculoData[patente].aceite)vehiculoData[patente].aceite={};
   if(!vehiculoData[patente].revision)vehiculoData[patente].revision={};
   if(!vehiculoData[patente].documentos)vehiculoData[patente].documentos=[];
   if(vehiculoData[patente].detalle===undefined)vehiculoData[patente].detalle='';
   if(!vehiculoData[patente].reglasMant)vehiculoData[patente].reglasMant=[];
+  if(!vehiculoData[patente].pendientes)vehiculoData[patente].pendientes=[];
+  if(!vehiculoData[patente].items)vehiculoData[patente].items=[];
   if((vehiculoData[patente].aceite.fecha||vehiculoData[patente].aceite.km||vehiculoData[patente].aceite.detalle||vehiculoData[patente].revision.fecha||vehiculoData[patente].revision.detalle)){
     migrarAceiteRevisionARegla(vehiculoData[patente]);
   }

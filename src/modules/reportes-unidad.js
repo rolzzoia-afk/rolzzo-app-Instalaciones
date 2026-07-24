@@ -1,4 +1,4 @@
-import { __set_ingresoMantNombre, descargarDocumentoVehiculo, exportVehiculoPDF, removeItemExtra, renderMantDetail } from './adjuntos-pendientes.js';
+import { __set_ingresoMantNombre, adjPendientes, descargarDocumentoVehiculo, exportVehiculoPDF, limpiarAdjPendientes, removeItemExtra, renderBarraAdjuntos, renderMantDetail, subirArchivosACola } from './adjuntos-pendientes.js';
 import { dbDeleteDocumentoVehiculo, dbDeleteUnidad, dbUpsertUnidad, dbUpsertVehiculo, saveAll, sb, sbReady } from './bootstrap.js';
 import { __set_mantSelected, __set_unidades, activarInputsFilesrc, lists, session, unidades } from './core-data.js';
 import { renderUniTable } from './dashboard-kpis.js';
@@ -11,7 +11,7 @@ import { fillSel, g, populateForms, tecnicosList } from './form-helpers.js';
 import { renderAdmin } from './listas-admin.js';
 import { ensureVehData } from './mantenciones-vehiculos.js';
 import { sw } from './nav.js';
-import { forzarDescarga, guardar, mostrarAvisoGuardadoOk } from './registro-adjuntos.js';
+import { forzarDescarga, guardar, mostrarAvisoGuardadoOk, tiposRegistroKm } from './registro-adjuntos.js';
 import { comprimirImagenSiHaceFalta, pdfAddPhotosPage } from './selector-foto-galeria.js';
 import { __set_uniregSelected, renderUniregChips } from './unidad-patente-selector.js';
 
@@ -390,6 +390,7 @@ export function verViajeModal(id){
   const rows=[
     ['Fecha',u.fecha?formatFecha(u.fecha):'—'],
     ['Mes',u.mes||'—'],
+    ['Tipo de registro',u.tipo||'—'],
     ['Conductor',u.conductor||'—'],
     ['Patente',u.patente||'—'],
     ['KM inicial',u.kmi!=null?Number(u.kmi).toLocaleString('es-CL'):'—'],
@@ -403,11 +404,14 @@ export function verViajeModal(id){
     ['Ingresado por',u.creadoPor||'—']
   ];
   let html=rows.map(f=>`<div class="regdet-row"><span class="regdet-lbl">${f[0]}</span><span class="regdet-val">${escapeHtml(String(f[1]))}</span></div>`).join('');
-  const galeria=[
-    {path:u.fotoKmiPath,nombre:'Odómetro KM inicial',icon:'ti-gauge'},
-    {path:u.fotoKmfPath,nombre:'Odómetro KM final',icon:'ti-gauge'},
-    {path:u.fotoPath,nombre:'Foto adicional',icon:'ti-camera'}
-  ].filter(f=>f.path);
+  /* fotosKm reemplaza a las fotos únicas de odómetro (fotoKmiPath/fotoKmfPath)
+     desde que el registro pasó a admitir varias fotos — pero se muestran las
+     antiguas igual para no perder el respaldo de registros ya guardados. */
+  const galeria=(u.fotosKm&&u.fotosKm.length
+    ?u.fotosKm.map(f=>({path:f.storagePath,nombre:f.tipo||f.nombreArchivo||'Foto del odómetro',icon:'ti-gauge'}))
+    :[{path:u.fotoKmiPath,nombre:'Odómetro KM inicial',icon:'ti-gauge'},{path:u.fotoKmfPath,nombre:'Odómetro KM final',icon:'ti-gauge'}])
+    .concat([{path:u.fotoPath,nombre:'Foto adicional',icon:'ti-camera'}])
+    .filter(f=>f.path);
   if(galeria.length){
     html+=`<p class="sec-lbl" style="margin-top:1.1rem">Fotos de respaldo (${galeria.length})</p><div class="ef-fotos-grid">`+
       galeria.map(f=>{
@@ -529,7 +533,7 @@ export function renderRepDetail(){
           <span class="reg-row-cliente">${u.total>0?u.total.toLocaleString('es-CL')+' km recorridos':'—'}</span>
           <span class="reg-row-badges">
             <span class="badge ${u.recarga==='SI'?'b-inst':'b-gar'}">${u.comb||'—'}</span>
-            ${(u.fotoKmiPath&&u.fotoKmfPath)?'<span class="badge b-ok"><i class="ti ti-camera" aria-hidden="true"></i> Con fotos</span>':'<span class="badge b-err"><i class="ti ti-camera-off" aria-hidden="true"></i> Sin fotos</span>'}
+            ${(u.fotoKmiPath||u.fotoKmfPath||(u.fotosKm&&u.fotosKm.length))?'<span class="badge b-ok"><i class="ti ti-camera" aria-hidden="true"></i> Con fotos</span>':'<span class="badge b-err"><i class="ti ti-camera-off" aria-hidden="true"></i> Sin fotos</span>'}
           </span>
         </div>
         <div class="reg-row-actions">
@@ -557,6 +561,7 @@ export function editarUnidadModal(id){
   const u=unidades.find(x=>x.id===id);if(!u)return;
   editUnidadId=id;
   g('ue-fecha').value=u.fecha||'';
+  fillSel('ue-tipo',tiposRegistroKm(),'');g('ue-tipo').value=u.tipo||'Registro de kilometraje';
   fillSel('ue-conductor',tecnicosList(),'');g('ue-conductor').value=u.conductor||'';
   fillSel('ue-patente',lists.vehiculos,'');g('ue-patente').value=u.patente||'';
   fillSel('ue-comb',lists.combustibles,'');g('ue-comb').value=u.comb||'FULL';
@@ -564,13 +569,48 @@ export function editarUnidadModal(id){
   g('ue-kmf').value=u.kmf||'';
   g('ue-recarga').value=u.recarga||'NO';
   g('ue-monto').value=u.monto||'';
+  limpiarAdjPendientes('uedit_kmfoto');
+  renderUeFotosKm();
   g('unidad-edit-modal').style.display='flex';
+}
+/* Fotos del odómetro ya guardadas (con botón eliminar) + dropzone para
+   agregar más, dentro del modal "Editar registro de unidad" — para que
+   desde "detalles" se pueda ver y editar absolutamente todo, tal como en
+   Mantenciones. */
+export function renderUeFotosKm(){
+  const wrap=g('ue-fotos-list');
+  if(!wrap)return;
+  const u=unidades.find(x=>x.id===editUnidadId);
+  const fotos=(u&&u.fotosKm)||[];
+  wrap.innerHTML=fotos.length?'<div class="ef-fotos-grid">'+fotos.map((f,i)=>{
+    const url=unidadFotoUrl(f.storagePath);
+    return `<div class="ef-foto-card">
+      <img src="${url}" alt="${escapeHtml(f.nombreArchivo||'foto')}" onclick="${url?`window.open('${url}','_blank')`:''}">
+      <div class="ef-foto-meta"><span class="ef-foto-name" title="${escapeHtml(f.tipo||f.nombreArchivo||'')}">${escapeHtml(f.tipo||f.nombreArchivo||'Foto')}</span>
+      <button class="btn-del" onclick="eliminarFotoKmEdit(${i})"><i class="ti ti-trash" aria-hidden="true"></i></button></div>
+    </div>`;
+  }).join('')+'</div>':'<p class="eval-empty" style="margin:0">Sin fotos guardadas.</p>';
+  const dz=g('ue-fotos-dz');
+  if(dz)dz.innerHTML=renderBarraAdjuntos('uedit_kmfoto');
+}
+export async function eliminarFotoKmEdit(idx){
+  const u=unidades.find(x=>x.id===editUnidadId);if(!u||!u.fotosKm)return;
+  if(!confirm('¿Eliminar esta foto?'))return;
+  const doc=u.fotosKm[idx];
+  const prev=u.fotosKm.slice();
+  u.fotosKm=u.fotosKm.filter((_,i)=>i!==idx);
+  u.fotoKmfPath=u.fotosKm.length?u.fotosKm[0].storagePath:null;
+  const ok=await dbUpsertUnidad(u);
+  if(!ok){u.fotosKm=prev;return;}
+  if(doc&&doc.storagePath&&sb)sb.storage.from('vehiculo-documentos').remove([doc.storagePath]).catch(()=>{});
+  renderUeFotosKm();
 }
 export function closeUnidadEditModal(){g('unidad-edit-modal').style.display='none';editUnidadId=null;}
 export async function saveUnidadEdit(){
   const u=unidades.find(x=>x.id===editUnidadId);if(!u)return;
-  const prevSnapshot={...u};
+  const prevSnapshot={...u,fotosKm:(u.fotosKm||[]).slice()};
   u.fecha=g('ue-fecha').value;u.mes=mesFromFecha(u.fecha);
+  u.tipo=g('ue-tipo').value;
   u.conductor=g('ue-conductor').value;
   u.patente=g('ue-patente').value;
   u.comb=g('ue-comb').value;
@@ -579,11 +619,16 @@ export async function saveUnidadEdit(){
   u.total=u.kmf-u.kmi;
   u.recarga=g('ue-recarga').value;
   u.monto=parseInt(g('ue-monto').value)||0;
+  if(!u.fotosKm)u.fotosKm=[];
+  const pendientes=adjPendientes['uedit_kmfoto']||[];
+  if(pendientes.length)await subirArchivosACola(u.patente,pendientes,u.tipo,u.fotosKm);
+  if(u.fotosKm.length)u.fotoKmfPath=u.fotosKm[0].storagePath;
   const ok=await dbUpsertUnidad(u);
   if(!ok){
     Object.assign(u,prevSnapshot);
     return;
   }
+  limpiarAdjPendientes('uedit_kmfoto');
   closeUnidadEditModal();
   renderReportes();
   renderUniTable();

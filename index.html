@@ -100,6 +100,10 @@
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
         <p class="card-title" style="margin:0;padding:0;border:none"><i class="ti ti-clipboard-list" aria-hidden="true"></i>Nueva visita</p>
       </div>
+      <div id="reg-editing-banner" style="display:none;background:#fff3cd;color:#7a5b00;border-radius:8px;padding:.6rem .9rem;margin:.7rem 0;font-size:12.5px;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <span><i class="ti ti-pencil" aria-hidden="true"></i> Editando la OT <b id="reg-editing-ot">—</b> ya guardada — al guardar se actualiza esta misma visita, no se crea una nueva.</span>
+        <button type="button" class="btn-sec btn-sm" onclick="cancelarEdicionOT()"><i class="ti ti-x" aria-hidden="true"></i> Cancelar edición</button>
+      </div>
       <div class="sep"></div>
       <p class="sec-lbl">General</p>
       <div class="fg">
@@ -241,6 +245,7 @@
           <small>JPG, PNG o PDF · máximo 15MB por archivo</small>
         </div>
         <div id="reg-adjuntos-pending"></div>
+        <div id="reg-adjuntos-ya-subidos"></div>
       </div>
       <hr class="sep">
       <p class="sec-lbl"><i class="ti ti-gift" aria-hidden="true"></i> Giftcard</p>
@@ -422,7 +427,7 @@
     <div class="pane" id="pane-unireg">
     <div id="unireg-chips" class="patente-chips"></div>
     <div class="card" style="--sec-color:#eda100">
-      <p class="card-title"><i class="ti ti-car" aria-hidden="true"></i>Registro de unidad vehicular</p>
+      <p class="card-title"><i class="ti ti-car" aria-hidden="true"></i>Registro de kilometraje</p>
       <div class="fg">
         <div class="field">
           <label>Fecha</label>
@@ -432,45 +437,54 @@
           <label>Mes</label>
           <input type="text" id="u-mes" readonly style="background:var(--surface-1,#f5f4f0);color:var(--text-muted)">
         </div>
-        <div class="field"><label>Conductor</label><select id="u-conductor"></select></div>
-        <div class="field" style="grid-column:1/-1">
-          <div class="fg" style="gap:.875rem">
-            <div class="field"><label>KM inicial</label><input type="number" id="u-kmi" placeholder="0" oninput="calcularKmRecorridos()"></div>
-            <div class="field"><label>Foto KM inicial <span class="req-asterisk">*</span></label><input type="file" id="u-foto-kmi" accept=".jpg,.jpeg,.png,.webp" style="text-transform:none"></div>
-          </div>
+        <div class="field">
+          <label>Tipo de registro</label>
+          <select id="u-tipo"></select>
         </div>
         <div class="field" style="grid-column:1/-1">
-          <div class="fg" style="gap:.875rem">
-            <div class="field"><label>KM final</label><input type="number" id="u-kmf" placeholder="0" oninput="calcularKmRecorridos()"></div>
-            <div class="field"><label>Foto KM final <span class="req-asterisk">*</span></label><input type="file" id="u-foto-kmf" accept=".jpg,.jpeg,.png,.webp" style="text-transform:none"></div>
-          </div>
+          <div class="field"><label>Kilometraje actual</label><input type="number" id="u-km" placeholder="0" oninput="calcularKmRecorridos()"></div>
+          <p id="u-km-sugerido" style="font-size:11px;color:var(--text-muted);margin:.5rem 0 0"></p>
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <label>Foto del odómetro <span class="req-asterisk">*</span></label>
+          <div id="u-foto-km-dz"></div>
         </div>
         <div class="field" style="grid-column:1/-1">
           <div class="km-recorridos-card" id="km-recorridos-card">
             <i class="ti ti-route" aria-hidden="true"></i>
-            <span>Kilómetros recorridos: <b id="km-recorridos-num">0</b> km</span>
+            <span>Kilómetros recorridos desde el último registro: <b id="km-recorridos-num">0</b> km</span>
           </div>
         </div>
-        <div class="field">
-          <label>Combustible</label>
-          <div class="rg" id="rg-comb"><div class="ro sel" onclick="selRg('rg-comb',this,'FULL')">Full</div><div class="ro" onclick="selRg('rg-comb',this,'MEDIO')">Medio</div><div class="ro" onclick="selRg('rg-comb',this,'BAJO')">Bajo</div></div>
-        </div>
-        <div class="field">
-          <label>¿Recargó combustible?</label>
-          <div class="rg" id="rg-recarga"><div class="ro" onclick="selRg('rg-recarga',this,'SI')">Sí</div><div class="ro sel" onclick="selRg('rg-recarga',this,'NO')">No</div></div>
-        </div>
-        <div class="field"><label>Monto recarga ($)</label><input type="number" id="u-monto" placeholder="0"></div>
-        <div class="field">
-          <label>Forma de pago</label>
-          <select id="u-pago"><option value="">— No aplica —</option></select>
-        </div>
-        <div class="field"><label>Foto adicional (tablero, peaje, bencina)</label><input type="file" id="u-foto" accept=".jpg,.jpeg,.png,.webp" style="text-transform:none"></div>
       </div>
-      <hr class="sep">
-      <p class="sec-lbl">Especificación / comentario del encargado</p>
-      <div class="field"><label>Detalle de lo realizado</label><textarea id="u-detalle" rows="3" placeholder="Ej: Traslado a bodega central, sin novedades en el trayecto"></textarea></div>
-      <button class="btn" onclick="guardarUnidad()" style="margin-top:1rem"><i class="ti ti-device-floppy" aria-hidden="true"></i>Guardar</button>
+      <button class="btn" onclick="guardarUnidad()" style="margin-top:1rem"><i class="ti ti-device-floppy" aria-hidden="true"></i>Guardar kilometraje</button>
       <div class="toast" id="toast-uni"><i class="ti ti-circle-check" aria-hidden="true"></i>Registro de unidad guardado.</div>
+
+      <div class="sub-accordion-simple" style="margin-top:1.2rem">
+        <div class="sub-accordion-simple-head" onclick="toggleUniregDetalles()">
+          <span><i class="ti ti-list" aria-hidden="true"></i>Más detalles (opcional): conductor, combustible, gastos</span>
+          <i class="sub-chevron" id="unireg-detalles-chevron" aria-hidden="true"></i>
+        </div>
+        <div class="sub-accordion-simple-body" id="unireg-detalles-body" style="display:none">
+          <div class="fg">
+            <div class="field"><label>Conductor</label><select id="u-conductor"></select></div>
+            <div class="field">
+              <label>Combustible</label>
+              <div class="rg" id="rg-comb"><div class="ro sel" onclick="selRg('rg-comb',this,'FULL')">Full</div><div class="ro" onclick="selRg('rg-comb',this,'MEDIO')">Medio</div><div class="ro" onclick="selRg('rg-comb',this,'BAJO')">Bajo</div></div>
+            </div>
+            <div class="field">
+              <label>¿Recargó combustible?</label>
+              <div class="rg" id="rg-recarga"><div class="ro" onclick="selRg('rg-recarga',this,'SI')">Sí</div><div class="ro sel" onclick="selRg('rg-recarga',this,'NO')">No</div></div>
+            </div>
+            <div class="field"><label>Monto recarga ($)</label><input type="number" id="u-monto" placeholder="0"></div>
+            <div class="field">
+              <label>Forma de pago</label>
+              <select id="u-pago"><option value="">— No aplica —</option></select>
+            </div>
+            <div class="field"><label>Foto adicional (tablero, peaje, bencina)</label><input type="file" id="u-foto" accept=".jpg,.jpeg,.png,.webp" style="text-transform:none"></div>
+          </div>
+          <div class="field" style="margin-top:.6rem"><label>Detalle de lo realizado</label><textarea id="u-detalle" rows="3" placeholder="Ej: Traslado a bodega central, sin novedades en el trayecto"></textarea></div>
+        </div>
+      </div>
     </div>
     <div class="card" style="--sec-color:#eda100">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
@@ -489,6 +503,7 @@
       </div>
       <div id="mant-chips" class="patente-chips"></div>
       <div id="mant-detail"></div>
+      <button id="pend-fab" class="pend-fab" style="display:none" onclick="abrirModalPendientes()" title="Pendientes de esta patente"></button>
     </div>
 
     <!-- ESTADO DE FLOTA -->
@@ -609,7 +624,8 @@
       <div class="filters" id="segrep-filters">
         <div style="display:flex;align-items:center;gap:6px"><label style="font-size:11px">Mes</label><select id="segrep-fil-mes" onchange="renderSegReportes()"></select></div>
         <button class="btn-sec" onclick="g('segrep-fil-mes').value='';renderSegReportes()">Limpiar</button>
-        <button class="dl-btn" style="margin-left:auto" onclick="exportSegReportesExcel()"><i class="ti ti-file-spreadsheet" aria-hidden="true"></i>Excel</button>
+        <button class="dl-btn" style="margin-left:auto" onclick="exportSegReportesPDF()"><i class="ti ti-download" aria-hidden="true"></i>Descargar reporte (PDF)</button>
+        <button class="dl-btn" style="background:#1D6F42" onclick="exportSegReportesExcel()"><i class="ti ti-file-spreadsheet" aria-hidden="true"></i>Excel</button>
       </div>
       <div class="card" style="padding:0;overflow:hidden">
         <div class="tbl-wrap"><table class="tbl">
@@ -738,31 +754,13 @@
   </div>
 </div>
 
-<div id="editot-modal" class="obs-modal-overlay" style="display:none" onclick="if(event.target===this)closeEditOTModal()">
-  <div class="obs-modal-box" style="max-width:480px">
-    <p class="obs-modal-title"><i class="ti ti-pencil" aria-hidden="true"></i>Editar OT</p>
-    <div class="fg">
-      <div class="field"><label>N° OT</label><input type="text" id="eot-ot"></div>
-      <div class="field"><label>Cliente</label><input type="text" id="eot-cliente"></div>
-      <div class="field"><label>Fecha</label><input type="date" id="eot-fecha"></div>
-      <div class="field"><label>Técnico 1</label><select id="eot-tec1"></select></div>
-      <div class="field"><label>Técnico 2</label><select id="eot-tec2"><option value="">— Ninguno —</option></select></div>
-      <div class="field"><label>Tipo de cortina</label><select id="eot-tcortina"></select></div>
-      <div class="field"><label>Cantidad</label><input type="number" id="eot-cantidad"></div>
-    </div>
-    <div class="field" style="margin-top:.7rem"><label>Comentario</label><textarea id="eot-comentario" rows="3"></textarea></div>
-    <div class="obs-modal-actions">
-      <button class="btn-sec" onclick="closeEditOTModal()">Cancelar</button>
-      <button class="btn" onclick="saveEditOT()"><i class="ti ti-check" aria-hidden="true"></i>Guardar cambios</button>
-    </div>
-  </div>
-</div>
 
 <div id="unidad-edit-modal" class="obs-modal-overlay" style="display:none" onclick="if(event.target===this)closeUnidadEditModal()">
   <div class="obs-modal-box" style="max-width:480px">
     <p class="obs-modal-title"><i class="ti ti-pencil" aria-hidden="true"></i>Editar registro de unidad</p>
     <div class="fg">
       <div class="field"><label>Fecha</label><input type="date" id="ue-fecha"></div>
+      <div class="field"><label>Tipo de registro</label><select id="ue-tipo"></select></div>
       <div class="field"><label>Conductor</label><select id="ue-conductor"></select></div>
       <div class="field"><label>Patente</label><select id="ue-patente"></select></div>
       <div class="field"><label>Combustible</label><select id="ue-comb"></select></div>
@@ -771,6 +769,9 @@
       <div class="field"><label>¿Recargó combustible?</label><select id="ue-recarga"><option value="NO">No</option><option value="SI">Sí</option></select></div>
       <div class="field"><label>Monto recarga ($)</label><input type="number" id="ue-monto"></div>
     </div>
+    <p class="sec-lbl" style="margin-top:.9rem">Fotos del odómetro</p>
+    <div id="ue-fotos-list"></div>
+    <div id="ue-fotos-dz" style="margin-top:.5rem"></div>
     <div class="obs-modal-actions">
       <button class="btn-sec" onclick="closeUnidadEditModal()">Cancelar</button>
       <button class="btn" onclick="saveUnidadEdit()"><i class="ti ti-check" aria-hidden="true"></i>Guardar cambios</button>
@@ -836,6 +837,19 @@
     <div id="mant-detalle-modal-body"></div>
     <div class="obs-modal-actions">
       <button class="btn" onclick="closeMantDetalleModal()">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal-pendientes" class="obs-modal-overlay" style="display:none" onclick="if(event.target===this)cerrarModalPendientes()">
+  <div class="obs-modal-box" style="max-width:440px;max-height:80vh;overflow-y:auto">
+    <p class="obs-modal-title"><i class="ti ti-alert-triangle" aria-hidden="true"></i>Pendientes — <span id="pend-modal-patente"></span></p>
+    <div id="pend-modal-list" style="margin-bottom:1rem"></div>
+    <div class="field" style="margin-bottom:.6rem"><label>Nuevo pendiente</label><textarea id="pend-nuevo-texto" rows="2" placeholder="Ej: Falta cambiar neumático trasero derecho"></textarea></div>
+    <div class="field" style="margin-bottom:.9rem"><label>Fecha límite (opcional)</label><input type="date" id="pend-nuevo-fecha"></div>
+    <div class="obs-modal-actions">
+      <button class="btn-sec" onclick="cerrarModalPendientes()">Cerrar</button>
+      <button class="btn" onclick="agregarPendienteVehiculo()"><i class="ti ti-plus" aria-hidden="true"></i>Agregar</button>
     </div>
   </div>
 </div>

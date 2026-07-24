@@ -42,23 +42,55 @@ export function computeAcordeonFotosOTs(){
   });
   return Object.values(byOt).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
 }
-/* Una OT se considera "Evaluada" (pasa a Historial) recién cuando tiene TANTO la nota
-   de estrellas COMO al menos un técnico marcado — así jefatura puede poner las estrellas
-   primero y seguir completando el resto sin que la OT desaparezca de Pendientes a medio camino. */
+/* Todos los campos del panel (estrellas, técnico, clasificación) llenos —
+   pero eso YA NO mueve la OT a Historial por sí solo. Jefatura pidió que el
+   paso a "Ya evaluadas" ocurra únicamente al presionar "Guardar evaluación"
+   (ver evaluacionGuardada/guardarNotaAdminAcc), porque antes cada estrella
+   que tocaban movía la fila de sección en el momento y los hacía perder el
+   lugar donde estaban parados. */
 export function evaluacionCompleta(m){
-  return !!(m&&m.adminNivel&&m.tecnicosEvaluados&&m.tecnicosEvaluados.length);
+  return !!(m&&m.adminNivel&&m.tecnicosEvaluados&&m.tecnicosEvaluados.length&&m.clasificacionContenido);
+}
+/* Único gatillo real para pasar de Pendientes a Historial: que exista un
+   registro guardado (botón "Guardar evaluación") para esa OT. evaluacionesFotos
+   solo se llena ahí (ver guardarNotaAdminAcc), nunca al tocar un campo suelto. */
+export function evaluacionGuardada(ot){
+  return evaluacionesFotos.some(e=>e.ot===ot);
+}
+/* Jefatura pidió que "Solo Respaldo Técnico" NO cuente como evaluación real:
+   solo lo clasificado "Apta para Redes Sociales" debe sumar en el reporte de
+   calidad y en los rankings (nota fotográfica promedio, top fotografía, etc). */
+export function cuentaComoEvaluada(m,ot){
+  return evaluacionGuardada(ot)&&!!(m&&m.clasificacionContenido==='redes');
+}
+/* Una evaluación "iniciada pero no completa": jefatura alcanzó a tocar algo
+   del panel (puso estrellas, clasificó el contenido, dejó comentario o
+   marcó un técnico) pero le faltó terminar el resto — el caso más común es
+   poner las estrellas y no llegar a marcar el técnico ni guardar. Se marca
+   distinto de "Pendiente" (nadie la ha tocado) para que no quede a medio
+   camino sin que nadie se dé cuenta. */
+export function evaluacionIniciada(m){
+  if(!m||evaluacionCompleta(m))return false;
+  return !!(m.adminNivel||m.clasificacionContenido||m.comentarioAdmin||(m.tecnicosEvaluados&&m.tecnicosEvaluados.length));
 }
 export function computeAcordeonFotosPendientes(){
-  return computeAcordeonFotosOTs().filter(r=>!evaluacionCompleta(evalFotosOT[r.ot]));
+  return computeAcordeonFotosOTs().filter(r=>!evaluacionGuardada(r.ot));
 }
 export function computeAcordeonFotosHistorial(){
-  return computeAcordeonFotosOTs().filter(r=>evaluacionCompleta(evalFotosOT[r.ot]));
+  return computeAcordeonFotosOTs().filter(r=>evaluacionGuardada(r.ot));
 }
 export function renderEvalFotosAccRow(r){
   const otJs=String(r.ot).replace(/'/g,"\\'");
   const abierta=efAcordeonOtAbierta===String(r.ot);
   const m=evalFotosOT[r.ot];
-  const evaluada=evaluacionCompleta(m);
+  const guardada=evaluacionGuardada(r.ot);
+  const evaluada=cuentaComoEvaluada(m,r.ot);
+  const soloTecnico=guardada&&!evaluada;
+  const listaParaGuardar=!guardada&&evaluacionCompleta(m);
+  const iniciada=!guardada&&!listaParaGuardar&&evaluacionIniciada(m);
+  const badgeCls=evaluada?'b-ok':(soloTecnico?'b-inst':((listaParaGuardar||iniciada)?'b-err':'badge-pendiente'));
+  const badgeIcon=evaluada?'ti-circle-check':(soloTecnico?'ti-tool':(listaParaGuardar?'ti-device-floppy':(iniciada?'ti-alert-triangle':'ti-clock-hour-4')));
+  const badgeTxt=evaluada?'Evaluada':(soloTecnico?'Respaldo Técnico':(listaParaGuardar?'Falta guardar':(iniciada?'Incompleta':'Pendiente')));
   return `<div class="ef-acc-item${abierta?' ef-acc-item-open':''}">
     <div class="reg-row resena-row" onclick="toggleEvalFotosAcordeonItem('${otJs}')">
       <div class="reg-row-info">
@@ -68,7 +100,7 @@ export function renderEvalFotosAccRow(r){
         <span class="reg-row-tec">${r.tec1?escapeHtml(r.tec1):'—'}</span>
       </div>
       <div class="reg-row-actions">
-        <span class="badge ${evaluada?'b-ok':'badge-pendiente'}"><i class="ti ${evaluada?'ti-circle-check':'ti-clock-hour-4'}" aria-hidden="true"></i> ${evaluada?'Evaluada':'Pendiente'}</span>
+        <span class="badge ${badgeCls}" ${listaParaGuardar?'title="Estrellas, técnico y clasificación listos: presiona \'Guardar evaluación\' para que pase al Historial."':(iniciada?'title="Se clasificó o comentó, pero faltan las estrellas y/o marcar el técnico."':(soloTecnico?'title="Guardada como Respaldo Técnico: no cuenta en el reporte de calidad ni en los rankings."':''))}><i class="ti ${badgeIcon}" aria-hidden="true"></i> ${badgeTxt}</span>
         <i class="ti ti-chevron-${abierta?'down':'right'}" aria-hidden="true" style="color:var(--text-muted);font-size:14px"></i>
       </div>
     </div>
@@ -141,6 +173,12 @@ export function renderEvalFotosAccContent(ot){
       `:`<div class="ef-waiting"><i class="ti ti-clock-hour-4" aria-hidden="true"></i>Esperando evaluación de administración...</div>`}
     </div>`;
 }
+/* Tocar estrellas/técnico/clasificación se auto-guarda en segundo plano
+   (para no perder el trabajo si cierran sin querer) pero YA NO mueve la fila
+   de "Pendientes" a "Historial" ni muestra ningún aviso — eso confundía a
+   jefatura porque la fila desaparecía de la lista apenas ponían la 5ta
+   estrella. El único que mueve la OT es el botón "Guardar evaluación"
+   (guardarNotaAdminAcc), que además exige tener los 3 campos listos. */
 export function setAdminNivelAcc(ot,n){
   if(!isAdminUser())return;
   ensureEvalFotosOT(ot).adminNivel=n;
@@ -172,6 +210,8 @@ export async function guardarNotaAdminAcc(ot){
   const m=ensureEvalFotosOT(ot);
   if(!m.adminNivel){alert('Elige una calificación de 1 a 5 estrellas.');return;}
   if(!m.tecnicosEvaluados.length){alert('Selecciona al menos un técnico al que aplica esta nota.');return;}
+  if(!m.clasificacionContenido){alert('Indica si es "Solo Respaldo Técnico" o "Apta para Redes Sociales" antes de guardar.');return;}
+  const eraGuardada=evaluacionGuardada(ot);
   const r=registros.find(x=>x.ot===ot);
   const fecha=(r&&r.fecha)||new Date().toISOString().slice(0,10);
   for(const persona of m.tecnicosEvaluados){
@@ -182,7 +222,14 @@ export async function guardarNotaAdminAcc(ot){
   }
   await dbUpsertEvalFotosOT(ot);
   renderEvalFotosAcordeon();
-  alert('Evaluación guardada para: '+m.tecnicosEvaluados.join(', '));
+  const esRedes=m.clasificacionContenido==='redes';
+  if(eraGuardada){
+    alert('Evaluación actualizada para: '+m.tecnicosEvaluados.join(', ')+'.');
+  }else if(esRedes){
+    alert('¡Evaluación guardada para: '+m.tecnicosEvaluados.join(', ')+'! Se movió a "Historial · Ya evaluadas".');
+  }else{
+    alert('Evaluación guardada para: '+m.tecnicosEvaluados.join(', ')+' como "Respaldo Técnico". Se movió al Historial, pero no cuenta en el reporte de calidad ni en los rankings.');
+  }
 }
 
 /* --- Seguimiento · Reseñas: acordeón puro dividido en Pendientes / Alerta / Historial.

@@ -1,10 +1,9 @@
-import { dbUpsertRegistro } from './bootstrap.js';
-import { __set_otContext, currentTab, lists, otContext, personas, registros } from './core-data.js';
+import { __set_otContext, currentTab, otContext, personas, registros } from './core-data.js';
 import { renderDash } from './dashboard-kpis.js';
-import { escapeHtml, evalFotosOT, evaluacionesFotos, formatFecha, isAdminUser, mesFromFecha } from './evaluaciones.js';
+import { escapeHtml, evalFotosOT, formatFecha } from './evaluaciones.js';
 import { __set_efAcordeonOtAbierta, __set_segResenaOtActiva, renderEvalFotos, renderEvalFotosAcordeon, renderSegResenas } from './evaluaciones-extra.js';
-import { fillSel, g, tecnicosList } from './form-helpers.js';
-import { renderRegReportes } from './periodo-helpers.js';
+import { g } from './form-helpers.js';
+import { iniciarEdicionOT } from './registro-adjuntos.js';
 
 /* ===== BUSCADOR GLOBAL DE OT ===== */
 export function buscarOTGlobal(){
@@ -61,72 +60,5 @@ export function pedirClaveEditarOT(){
   if(pin===null)return;
   const admin=personas.find(p=>p.rol==='admin'&&p.codigo===pin);
   if(!admin){alert('Clave incorrecta o no corresponde a un administrador.');return;}
-  abrirEditarOTModal();
-}
-export function abrirEditarOTModal(){
-  if(!isAdminUser()){
-    alert('Solo un administrador puede editar una OT ya registrada.');
-    return;
-  }
-  const r=otContext.registro;
-  g('eot-ot').value=r.ot||'';
-  g('eot-cliente').value=r.cliente||'';
-  g('eot-fecha').value=r.fecha||'';
-  fillSel('eot-tec1',tecnicosList(),'');g('eot-tec1').value=r.tec1||'';
-  fillSel('eot-tec2',tecnicosList(),'— Ninguno —');g('eot-tec2').value=r.tec2||'';
-  fillSel('eot-tcortina',lists.tiposCortina,'');g('eot-tcortina').value=r.tipoCortina||'';
-  g('eot-cantidad').value=r.cantidad||'';
-  g('eot-comentario').value=r.comentario||'';
-  g('editot-modal').style.display='flex';
-}
-export function closeEditOTModal(){g('editot-modal').style.display='none';}
-export async function saveEditOT(){
-  const r=otContext.registro;
-  const nuevaOT=g('eot-ot').value.trim();
-  const otAnterior=r.ot;
-  if(!nuevaOT){alert('El N° de OT no puede quedar vacío.');return;}
-  if(nuevaOT!==otAnterior&&registros.some(x=>x.ot===nuevaOT&&x!==r)){
-    alert('Ya existe otra visita registrada con ese N° de OT. Elige un número distinto.');
-    return;
-  }
-  const prevSnapshot={...r};
-  r.ot=nuevaOT;
-  r.cliente=g('eot-cliente').value;
-  r.fecha=g('eot-fecha').value;
-  r.mes=mesFromFecha(r.fecha);
-  r.tec1=g('eot-tec1').value;
-  r.tec2=g('eot-tec2').value;
-  r.tipoCortina=g('eot-tcortina').value;
-  r.cantidad=parseInt(g('eot-cantidad').value)||0;
-  r.comentario=g('eot-comentario').value;
-  if(nuevaOT!==otAnterior){
-    /* Propaga el cambio de N° de OT a todas las estructuras relacionadas
-       (evaluaciones/fotos por OT) para que nada quede huérfano bajo el número antiguo. */
-    evaluacionesFotos.forEach(e=>{if(e.ot===otAnterior)e.ot=nuevaOT;});
-    if(evalFotosOT[otAnterior]){
-      evalFotosOT[nuevaOT]=evalFotosOT[otAnterior];
-      delete evalFotosOT[otAnterior];
-    }
-    if(otContext)otContext.ot=nuevaOT;
-  }
-  const ok=await dbUpsertRegistro(r);
-  if(!ok){
-    Object.assign(r,prevSnapshot);
-    if(nuevaOT!==otAnterior){
-      evaluacionesFotos.forEach(e=>{if(e.ot===nuevaOT)e.ot=otAnterior;});
-      if(evalFotosOT[nuevaOT]){
-        evalFotosOT[otAnterior]=evalFotosOT[nuevaOT];
-        delete evalFotosOT[nuevaOT];
-      }
-      if(otContext)otContext.ot=otAnterior;
-    }
-    return;
-  }
-  closeEditOTModal();
-  renderOTContextBar();
-  if(currentTab==='dash')renderDash();
-  if(currentTab==='regrep')renderRegReportes();
-  if(currentTab==='seg_fotos')renderEvalFotos();
-  if(currentTab==='seg_resenas')renderSegResenas();
-  alert('OT actualizada correctamente.');
+  iniciarEdicionOT(otContext.registro);
 }

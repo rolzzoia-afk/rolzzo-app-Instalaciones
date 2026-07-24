@@ -1,13 +1,16 @@
+import { adjPendientes, limpiarAdjPendientes, renderBarraAdjuntos, subirArchivosACola } from './adjuntos-pendientes.js';
 import { GOOGLE_REVIEW_LINK, dbUpsertRegistro, dbUpsertUnidad, sb, sbReady } from './bootstrap.js';
 import { __set_charts, __set_registros, __set_unidades, charts, currentTab, lists, otContext, registros, rgVals, session, unidades } from './core-data.js';
 import { renderDash, renderUniTable } from './dashboard-kpis.js';
-import { dbUpsertEvalFotosOT, ensureEvalFotosOT, esMiOT, escapeHtml, evalFotosOT, isAdminUser } from './evaluaciones.js';
+import { dbUpsertEvalFotosOT, ensureEvalFotosOT, esMiOT, escapeHtml, evalFotosOT, evaluacionesFotos, isAdminUser } from './evaluaciones.js';
 import { renderSegResenas } from './evaluaciones-extra.js';
 import { __set_extraRows, extraRows, extrasValidos, renderExtraRows } from './form-adicionales-garantia.js';
-import { actualizarCamposGiftcard, actualizarWhatsappRegistro, calcDur, g, selRg, toggleAnclaje } from './form-helpers.js';
+import { actualizarCamposGiftcard, actualizarWhatsappRegistro, calcDur, fillSel, g, selRg, toggleAnclaje } from './form-helpers.js';
 import { __set_productoRows, productoRows, productosValidos, renderProductoRows } from './form-productos.js';
 import { __set_fotografos, __set_materialRows, __set_tecnicosExtra, fotografos, fotografosValidos, materialRows, materialesValidos, renderFotografosRows, renderMaterialRows, renderTecnicosExtra, resetFotografos, resetMaterialRows, tecnicosExtra, tecnicosExtraValidos } from './form-tecnicos-extra.js';
-import { verDetalleRegistro } from './periodo-helpers.js';
+import { kmActualVeh } from './mantenciones-vehiculos.js';
+import { sw } from './nav.js';
+import { renderRegReportes, verDetalleRegistro } from './periodo-helpers.js';
 import { populateComunasForRegion } from './regiones-comunas.js';
 import { currentUserName } from './reportes-unidad.js';
 import { comprimirImagenSiHaceFalta, limpiarPreviewArchivo } from './selector-foto-galeria.js';
@@ -20,9 +23,32 @@ export let regAdjuntosPendientes=[];
    aprieta "Guardar registro", esos archivos no se vuelvan a subir ni se
    pierdan — simplemente se incluyen tal cual en el registro final. */
 export let regAdjuntosYaSubidos=[];
+/* Si no es null, el formulario "OT nueva" está en modo edición de esta visita
+   ya guardada (id de registros[]): guardar() actualiza esa misma fila en vez
+   de crear una nueva. Ver iniciarEdicionOT() / cancelarEdicionOT(). */
+export let regEditingId=null;
 export function handleRegAdjuntosSelected(fileList){
   [...fileList].forEach(f=>regAdjuntosPendientes.push(f));
   renderRegAdjuntosPendientes();
+}
+export function renderRegAdjuntosYaSubidos(){
+  const el=g('reg-adjuntos-ya-subidos');
+  if(!el)return;
+  if(!regAdjuntosYaSubidos.length){el.innerHTML='';return;}
+  el.innerHTML='<p class="sec-lbl" style="margin-top:.8rem">Ya subidos ('+regAdjuntosYaSubidos.length+')</p><div class="ef-fotos-grid">'+regAdjuntosYaSubidos.map((a,i)=>{
+    const url=adjuntoUrl(a);
+    const isImg=(a.mimeType||'').startsWith('image/');
+    const nombre=escapeHtml(a.nombreArchivo||'archivo');
+    const media=isImg&&url?`<img src="${url}" alt="${nombre}" onclick="window.open('${url}','_blank')">`:`<div class="ef-foto-ph" onclick="${url?`window.open('${url}','_blank')`:''}"><i class="ti ti-file-type-pdf" aria-hidden="true"></i></div>`;
+    return `<div class="ef-foto-card">${media}<div class="ef-foto-meta"><span class="ef-foto-name" title="${nombre}">${nombre}</span><button class="btn-del" onclick="eliminarAdjuntoRegYaSubido(${i})"><i class="ti ti-trash" aria-hidden="true"></i></button></div></div>`;
+  }).join('')+'</div>';
+}
+export function eliminarAdjuntoRegYaSubido(idx){
+  if(!confirm('¿Quitar este documento de la visita? Se eliminará al guardar.'))return;
+  const doc=regAdjuntosYaSubidos[idx];
+  regAdjuntosYaSubidos=regAdjuntosYaSubidos.filter((_,i)=>i!==idx);
+  if(doc&&doc.storagePath&&sb)sb.storage.from('registro-adjuntos').remove([doc.storagePath]).catch(()=>{});
+  renderRegAdjuntosYaSubidos();
 }
 export function renderRegAdjuntosPendientes(){
   const el=g('reg-adjuntos-pending');
@@ -141,6 +167,7 @@ export function joinProbField(key){
   return vals.map((v,i)=>`${i+1}- ${v}`).join(' / ');
 }
 export async function guardar(){
+  if(regEditingId){return guardarEdicionOT();}
   const ot=g('f-ot').value;
   if(!ot||!ot.trim()){alert('Debes ingresar el N° de OT antes de guardar.');return;}
   if(!sbReady())return;
@@ -211,6 +238,136 @@ export async function guardar(){
   mostrarAvisoGuardadoOk(r.ot);
   clearRegDraft();
   blankRegForm();
+}
+/* Reparte un campo tipo "1- A / 2- B" (ver joinProbField) de vuelta en una
+   lista de valores sueltos ["A","B"]. Si el campo no tiene ese formato
+   (una sola fila, o vacío), lo devuelve tal cual en una lista de 1. */
+function parseProbField(str){
+  if(!str)return[];
+  if(!/^\d+-\s/.test(str))return[str];
+  return str.split(' / ').map(s=>s.replace(/^\d+-\s*/,''));
+}
+/* Convierte un registro ya guardado al mismo formato "borrador" que usa
+   applyRegDraftToForm(), para poder abrir el formulario "OT nueva" con
+   TODOS sus datos ya cargados y editables (en vez de un modal aparte con
+   solo unos pocos campos). */
+export function registroToDraftFields(r){
+  const probs=parseProbField(r.problema), sols=parseProbField(r.solucion), quesols=parseProbField(r.queSol);
+  const nFilas=Math.max(probs.length,sols.length,quesols.length,1);
+  const problemaRows=[];
+  for(let i=0;i<nFilas;i++)problemaRows.push({problema:probs[i]||'',solucion:sols[i]||'',quesol:quesols[i]||''});
+  return{
+    fields:{
+      'f-fecha':r.fecha||'','f-mes':r.mes||'','f-ot':r.ot||'','f-cliente':r.cliente||'',
+      'f-telefono-cliente':r.telefono||'',
+      'f-tec1':r.tec1||'','f-tec2':r.tec2||'','f-tec3':r.tec3||'','f-tec4':r.tec4||'',
+      'f-hinicio':r.hinicio||'','f-hsalida':r.hsalida||'','f-traslado':r.traslado||'',
+      'f-ubic':r.ubicacion||'','f-codmotor':r.codMotor||'',
+      'f-calle':r.calle||'','f-numero':r.numero||'','f-region':r.region||'','f-comuna':r.comuna||'',
+      'f-seg-comentario':r.comentarioSeguimiento||'','f-comentario':r.comentario||'',
+      'f-giftcard-codigo':r.giftcardCodigo||'','f-giftcard-desc':(r.giftcardDescuento??'')
+    },
+    rgVals:{
+      'rg-tipo':r.tipo||'Instalación','rg-niveldif':r.nivelDif||'MEDIO','rg-anclaje':r.anclaje||'',
+      'rg-giftcard':r.giftcard||'No','rg-google':r.google||'No','rg-video':r.video||'No','rg-danos':r.danos||'No'
+    },
+    productoRows:(r.productos&&r.productos.length)?r.productos.map(p=>({tipo:p.tipo||'',cantidad:p.cantidad||'',codigo:p.codigo||''})):[{tipo:'',cantidad:'',codigo:''}],
+    extraRows:(r.extras&&r.extras.length)?r.extras.map(e=>({adicional:e.adicional||'',cantidad:e.cantidad||'',tipoGar:e.tipoGar||''})):[{adicional:'',tipoGar:''}],
+    tecnicosExtra:r.tecnicosExtra||[],
+    materialRows:(r.materiales&&r.materiales.length)?r.materiales.slice():[''],
+    fotografos:r.fotografos||[],
+    problemaRows
+  };
+}
+/* Pone el formulario "OT nueva" en modo edición para esta visita ya guardada:
+   lo llena con TODOS sus datos (incluidos los adjuntos ya subidos) usando el
+   mismo mecanismo del borrador, y deja el botón "Guardar registro" listo para
+   actualizar esta misma fila en vez de crear una nueva. Solo un administrador
+   puede editar una visita ya guardada. */
+export function iniciarEdicionOT(r){
+  if(!isAdminUser()){alert('Solo un administrador puede editar una visita ya registrada.');return;}
+  regEditingId=r.id;
+  applyRegDraftToForm(registroToDraftFields(r));
+  regAdjuntosYaSubidos=[...(r.adjuntos||[])];
+  regAdjuntosPendientes=[];
+  renderRegAdjuntosPendientes();
+  renderRegAdjuntosYaSubidos();
+  const banner=g('reg-editing-banner');
+  if(banner){banner.style.display='flex';}
+  const otSpan=g('reg-editing-ot');
+  if(otSpan)otSpan.textContent=r.ot||'—';
+  sw('regnew');
+  const card=document.querySelector('#pane-regnew .card');
+  if(card)card.scrollIntoView({behavior:'smooth',block:'start'});
+}
+export function cancelarEdicionOT(){
+  regEditingId=null;
+  const banner=g('reg-editing-banner');
+  if(banner)banner.style.display='none';
+  clearRegDraft();
+  blankRegForm();
+}
+/* Guarda los cambios de una visita ya existente (modo edición): lee los
+   mismos campos que guardar(), pero actualiza esa fila en vez de crear una
+   nueva. Se llama automáticamente desde guardar() cuando regEditingId está
+   activo — nunca hace falta llamarla directo. */
+export async function guardarEdicionOT(){
+  const r=registros.find(x=>x.id===regEditingId);
+  if(!r){alert('No se encontró la visita que se estaba editando.');regEditingId=null;return;}
+  const ot=g('f-ot').value;
+  if(!ot||!ot.trim()){alert('Debes ingresar el N° de OT antes de guardar.');return;}
+  if(!sbReady())return;
+  const hi=g('f-hinicio').value, hs=g('f-hsalida').value;
+  let durMin=null;
+  if(hi&&hs){const[hh,mm]=hi.split(':').map(Number);const[sh,sm]=hs.split(':').map(Number);durMin=(sh*60+sm)-(hh*60+mm);}
+  const productos=productosValidos().map(p=>({tipo:p.tipo,cantidad:parseInt(p.cantidad)||0,codigo:(p.codigo||'').trim()}));
+  const tipoCortina=productos.map(p=>p.tipo).join(', ');
+  const cantidad=productos.reduce((s,p)=>s+p.cantidad,0);
+  const adjuntosNuevos=await subirRegAdjuntosPendientes(ot);
+  const adjuntos=[...regAdjuntosYaSubidos,...adjuntosNuevos];
+  const extras=extrasValidos().map(e=>({adicional:e.adicional,cantidad:parseInt(e.cantidad)||0,tipoGar:e.tipoGar}));
+  const adicional=extras.map(e=>e.adicional).filter(Boolean).join(', ');
+  const tipoGar=extras.map(e=>e.tipoGar).filter(Boolean).join(', ');
+  const materiales=materialesValidos();
+  const otAnterior=r.ot;
+  Object.assign(r,{
+    fecha:g('f-fecha').value,mes:g('f-mes').value,
+    tipo:rgVals['rg-tipo']||'',ot,cliente:g('f-cliente').value,
+    tec1:g('f-tec1').value,tec2:g('f-tec2').value,tec3:g('f-tec3').value,tec4:g('f-tec4').value,
+    tecnicosExtra:tecnicosExtraValidos(),
+    hinicio:hi,hsalida:hs,durMin,traslado:g('f-traslado').value,
+    tipoCortina,cantidad,productos,
+    adicional,tipoGar,extras,
+    nivelDif:rgVals['rg-niveldif']||'',
+    materiales,material:materiales.join(', '),
+    anclaje:rgVals['rg-anclaje']||'',
+    ubicacion:g('f-ubic').value,codMotor:g('f-codmotor').value,
+    calle:g('f-calle').value,numero:g('f-numero').value,
+    region:g('f-region').value,comuna:g('f-comuna').value,
+    google:rgVals['rg-google']||'No',video:rgVals['rg-video']||'No',danos:rgVals['rg-danos']||'No',
+    comentarioSeguimiento:g('f-seg-comentario').value,
+    problema:joinProbField('problema'),solucion:joinProbField('solucion'),queSol:joinProbField('quesol'),
+    comentario:g('f-comentario').value,adjuntos,
+    fotografos:fotografosValidos(),
+    giftcard:rgVals['rg-giftcard']||'No',
+    giftcardCodigo:(g('f-giftcard-codigo')?.value||'').trim(),
+    giftcardDescuento:g('f-giftcard-desc')?.value?parseInt(g('f-giftcard-desc').value)||0:null
+  });
+  const ok=await dbUpsertRegistro(r);
+  if(!ok)return;
+  if(otAnterior!==ot){
+    evaluacionesFotos.forEach(e=>{if(e.ot===otAnterior)e.ot=ot;});
+    if(evalFotosOT[otAnterior]){evalFotosOT[ot]=evalFotosOT[otAnterior];delete evalFotosOT[otAnterior];dbUpsertEvalFotosOT(ot);}
+  }
+  regEditingId=null;
+  const banner=g('reg-editing-banner');
+  if(banner)banner.style.display='none';
+  showToast('toast-reg');
+  mostrarAvisoGuardadoOk(r.ot);
+  clearRegDraft();
+  blankRegForm();
+  renderRegReportes();
+  if(currentTab==='dash')renderDash();
 }
 export function formatFechaCorta(fecha){
   const[y,m,d]=fecha.split('-');
@@ -684,27 +841,64 @@ export function enviarInvitacionRegistro(){
   const url=`https://wa.me/${telLimpio.replace(/^\+/,'')}?text=${encodeURIComponent(mensaje)}`;
   window.open(url,'_blank');
 }
-/* Calcula en tiempo real los km recorridos (Final - Inicial) mientras el usuario
-   escribe, mostrándolo en la tarjeta destacada del formulario de kilometraje. */
+/* Kilometraje ya registrado para la patente seleccionada (el más alto de
+   todos sus registros de Unidad) — es el punto de partida "de fábrica" que
+   se sugiere en el campo, para que el chofer no tenga que volver a
+   escribirlo cada día: alcanza con confirmar/ajustar y sacar la foto. */
+export function kmBaseUnireg(){
+  return uniregSelected?(kmActualVeh(uniregSelected)||0):0;
+}
+/* Precarga "Kilometraje actual" con el último registrado para la patente
+   elegida (si el campo está vacío, para no pisar lo que la persona ya
+   escribió) y muestra de dónde salió ese número. Se llama al elegir
+   patente y al entrar a la pestaña. */
+export function actualizarKmSugerido(){
+  const hint=g('u-km-sugerido');
+  const kmEl=g('u-km');
+  if(!hint||!kmEl)return;
+  const base=kmBaseUnireg();
+  if(base>0){
+    hint.textContent='Sugerido según el último registro: '+base.toLocaleString('es-CL')+' km. Ajústalo si el odómetro marca otra cosa.';
+    if(!kmEl.value)kmEl.value=base;
+  }else{
+    hint.textContent='Sin registros previos para esta patente — ingresa el kilometraje que marca el odómetro.';
+  }
+  calcularKmRecorridos();
+}
+/* Calcula en tiempo real los km recorridos desde el último registro
+   (kilometraje ingresado - último kilometraje conocido de la patente),
+   mostrándolo en la tarjeta destacada del formulario. */
 export function calcularKmRecorridos(){
-  const kmi=parseInt(g('u-kmi').value)||0;
-  const kmf=parseInt(g('u-kmf').value)||0;
+  const km=parseInt(g('u-km').value)||0;
+  const base=kmBaseUnireg();
   const card=g('km-recorridos-card');
   const numEl=g('km-recorridos-num');
   if(!card||!numEl)return;
-  const total=kmf-kmi;
-  if(kmi>0&&kmf>0&&total>=0){
+  const total=km-base;
+  if(km>0&&base>0&&total>=0){
     numEl.textContent=total.toLocaleString('es-CL');
     card.style.opacity='1';
     card.classList.remove('km-recorridos-warn');
-  }else if(kmi>0&&kmf>0&&total<0){
-    numEl.textContent='KM final debe ser mayor al inicial';
+  }else if(km>0&&base>0&&total<0){
+    numEl.textContent='Es menor al último registrado ('+base.toLocaleString('es-CL')+' km)';
     card.classList.add('km-recorridos-warn');
   }else{
     numEl.textContent='0';
     card.style.opacity='.6';
     card.classList.remove('km-recorridos-warn');
   }
+}
+/* "Más detalles (opcional)": conductor, combustible, gastos y comentario del
+   día — colapsado por defecto para que la pantalla principal sea solo
+   kilometraje + foto, pero sigue disponible para quien quiera dejarlo
+   registrado. */
+export let uniregDetallesOpen=false;
+export function toggleUniregDetalles(){
+  uniregDetallesOpen=!uniregDetallesOpen;
+  const body=g('unireg-detalles-body');
+  const chevron=g('unireg-detalles-chevron');
+  if(body)body.style.display=uniregDetallesOpen?'':'none';
+  if(chevron)chevron.classList.toggle('open',uniregDetallesOpen);
 }
 export async function subirFotoUnidad(u,inputId,carpeta){
   const fileInput=g(inputId);
@@ -723,16 +917,48 @@ export async function subirFotoUnidad(u,inputId,carpeta){
     return null;
   }
 }
+/* Lista combinada de "tipo de registro" para el kilometraje diario: el
+   catálogo de mantenciones + el de documentos del vehículo, unificados en
+   uno solo (mismo catálogo que usa "Otras mantenciones y documentos" en
+   Mantenciones), más una primera opción para el registro normal de todos
+   los días. Así, si un técnico aprovecha este mismo formulario para dejar
+   respaldo de una mantención (ej: boleta de cambio de aceite), queda
+   clasificado igual que en el resto de la app. */
+export function tiposRegistroKm(){
+  const combinados=[...new Set([...(lists.mantNombres||[]),...(lists.docTypes||[])])];
+  return ['Registro de kilometraje',...combinados];
+}
+export function renderUTipoOptions(){
+  fillSel('u-tipo',tiposRegistroKm(),'');
+  if(g('u-tipo')&&!g('u-tipo').value)g('u-tipo').value='Registro de kilometraje';
+}
+/* Reemplaza el <input type="file"> único de la foto del odómetro por la
+   misma dropzone (cámara / galería / escanear, varias fotos a la vez) que
+   usa Registro de OT y Mantenciones — jefatura pidió que se vea y funcione
+   igual en toda la app. */
+export function renderUFotoKmDropzone(){
+  const el=g('u-foto-km-dz');
+  if(!el)return;
+  el.innerHTML=renderBarraAdjuntos('kmfoto');
+}
+/* Guarda un registro de kilometraje con un solo número: el kilometraje
+   inicial (kmi) no se pide — se toma automáticamente del último kilometraje
+   conocido de la patente (kmBaseUnireg), igual que hacía antes con dos
+   fotos por día. Así el chofer solo escribe/confirma un número y saca una
+   foto, pero "km recorridos" y todo lo que ya usaba kmi/kmf (Historial,
+   PDF, Excel, Estado de Flota) sigue funcionando sin cambios. */
 export async function guardarUnidad(){
-  const kmi=parseInt(g('u-kmi').value)||0,kmf=parseInt(g('u-kmf').value)||0;
-  const fotoKmiInput=g('u-foto-kmi'),fotoKmfInput=g('u-foto-kmf');
+  const km=parseInt(g('u-km').value)||0;
+  const tipo=g('u-tipo')?g('u-tipo').value:'Registro de kilometraje';
+  const fotosPendientes=adjPendientes['kmfoto']||[];
   if(!uniregSelected){alert('Selecciona una patente arriba antes de guardar.');return;}
-  if(!fotoKmiInput.files[0]){alert('La foto del kilometraje inicial es obligatoria.');return;}
-  if(!fotoKmfInput.files[0]){alert('La foto del kilometraje final es obligatoria.');return;}
-  if(kmf<kmi){alert('El kilometraje final no puede ser menor al inicial.');return;}
-  const u={id:Date.now(),fecha:g('u-fecha').value,mes:g('u-mes').value,
+  if(!km){alert('Ingresa el kilometraje que marca el odómetro.');return;}
+  if(!fotosPendientes.length){alert('La foto del odómetro es obligatoria.');return;}
+  const kmi=kmBaseUnireg();
+  if(kmi>0&&km<kmi){alert('El kilometraje ingresado ('+km.toLocaleString('es-CL')+' km) es menor al último registrado para esta patente ('+kmi.toLocaleString('es-CL')+' km). Revisa la foto del odómetro antes de guardar.');return;}
+  const u={id:Date.now(),fecha:g('u-fecha').value,mes:g('u-mes').value,tipo,
     conductor:g('u-conductor').value,patente:uniregSelected,
-    kmi,kmf,total:kmf-kmi,comb:rgVals['rg-comb']||'',recarga:rgVals['rg-recarga']||'',
+    kmi,kmf:km,total:kmi>0?km-kmi:0,comb:rgVals['rg-comb']||'',recarga:rgVals['rg-recarga']||'',
     monto:parseInt(g('u-monto').value)||0,pago:g('u-pago').value,
     /* Los campos de integrantes ya no se piden en el formulario, pero se
        mantienen en el modelo de datos por compatibilidad con registros
@@ -740,9 +966,9 @@ export async function guardarUnidad(){
        lo tenía). Los inputs u-i1..u-i4 ya no existen en el DOM. */
     i1:'',i2:'',i3:'',i4:'',
     detalle:g('u-detalle').value,
-    creadoPor:currentUserName(),fotoPath:null,fotoKmiPath:null,fotoKmfPath:null};
-  u.fotoKmiPath=await subirFotoUnidad(u,'u-foto-kmi','KM_INICIAL');
-  u.fotoKmfPath=await subirFotoUnidad(u,'u-foto-kmf','KM_FINAL');
+    creadoPor:currentUserName(),fotoPath:null,fotoKmiPath:null,fotoKmfPath:null,fotosKm:[]};
+  await subirArchivosACola(uniregSelected,fotosPendientes,tipo,u.fotosKm);
+  if(u.fotosKm.length)u.fotoKmfPath=u.fotosKm[0].storagePath;
   const fileInput=g('u-foto');
   let file=fileInput&&fileInput.files[0];
   if(file){
@@ -761,12 +987,13 @@ export async function guardarUnidad(){
     return;
   }
   showToast('toast-uni');
-  g('u-kmi').value='';g('u-kmf').value='';g('u-monto').value='';
+  g('u-km').value='';g('u-monto').value='';
   g('u-detalle').value='';
   if(fileInput)fileInput.value='';
-  fotoKmiInput.value='';fotoKmfInput.value='';
-  limpiarPreviewArchivo('u-foto-kmi');limpiarPreviewArchivo('u-foto-kmf');limpiarPreviewArchivo('u-foto');
-  calcularKmRecorridos();
+  limpiarAdjPendientes('kmfoto');
+  limpiarPreviewArchivo('u-foto');
+  renderUTipoOptions();
+  actualizarKmSugerido();
   renderUniTable();
 }
 export function showToast(id){

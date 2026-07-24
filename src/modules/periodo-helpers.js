@@ -1,6 +1,5 @@
 import { renderMantDetail } from './adjuntos-pendientes.js';
 import { dbDeleteEvalFoto, dbDeleteRegistro, dbError, dbUpsertVehiculo, sb, sbReady } from './bootstrap.js';
-import { abrirEditarOTModal } from './buscador-ot.js';
 import { MESES, __set_otContext, __set_registros, currentTab, otContext, registros } from './core-data.js';
 import { renderDash } from './dashboard-kpis.js';
 import { __set_evaluacionesFotos, escapeHtml, evalFotosOT, evaluacionesFotos, formatFecha, isAdminUser, safeId } from './evaluaciones.js';
@@ -8,7 +7,7 @@ import { __set_efAcordeonOtAbierta, efAcordeonOtAbierta, renderEvalFotos } from 
 import { pdfCheckPageBreak, pdfDrawHeader, pdfDrawTitleBlock, pdfSectionBar } from './evaluaciones-pdf.js';
 import { anclajeLabel, g, nivelDifLabel, tecnicosList } from './form-helpers.js';
 import { ensureVehData } from './mantenciones-vehiculos.js';
-import { adjuntoUrl, forzarDescarga } from './registro-adjuntos.js';
+import { adjuntoUrl, forzarDescarga, iniciarEdicionOT } from './registro-adjuntos.js';
 import { pdfAddPhotosPage } from './selector-foto-galeria.js';
 
 /* ===== Helpers de período (Mes actual / Semana actual / Año completo / Rango) ===== */
@@ -215,12 +214,12 @@ export function verDetalleRegistro(id){
 export function closeRegDetailModal(){g('reg-detail-modal').style.display='none';}
 export function editarRegistroModal(id){
   const r=registros.find(x=>x.id===id);if(!r)return;
-  __set_otContext({ot:r.ot,registro:r});
   if(!isAdminUser()){
     alert('Solo un administrador puede editar una OT ya registrada. Solicita la edición a un perfil de administrador.');
     return;
   }
-  abrirEditarOTModal();
+  closeRegDetailModal();
+  iniciarEdicionOT(r);
 }
 /* Elimina la ficha completa de una OT (seguimientos, comentarios, fotos) de Supabase */
 export async function dbDeleteEvalFotosOT(ot){
