@@ -23,6 +23,48 @@ export function sbReady(){
   return true;
 }
 
+/* Capa de seguridad adicional (invisible para el usuario): antes de cargar
+   datos, asegura una sesión anónima de Supabase Auth (JWT con role
+   "authenticated") además del login por PIN que ya existe. Esto NO reemplaza
+   el PIN ni cambia nada de la UI — solo permite que, el día que se ajusten
+   las políticas RLS para exigir auth.role()='authenticated', la app siga
+   funcionando igual. Si falla (p.ej. "Anonymous sign-ins" desactivado en el
+   Dashboard, o sin internet), solo se avisa en consola y se sigue igual:
+   nunca debe dejar a un técnico sin poder entrar a la app.*/
+async function ensureAnonSession(){
+  if(!sb)return;
+  try{
+    const{data,error:getErr}=await sb.auth.getSession();
+    if(getErr){console.error('No se pudo verificar la sesión anónima de Supabase:',getErr);return;}
+    if(data&&data.session)return;
+    const{error}=await sb.auth.signInAnonymously();
+    if(error)console.error('No se pudo crear la sesión anónima de Supabase (auth adicional):',error);
+  }catch(e){
+    console.error('No se pudo crear la sesión anónima de Supabase (auth adicional):',e);
+  }
+}
+
+/* Valida un PIN de 4 dígitos contra la Edge Function "validar-pin" en vez
+   de compararlo contra una copia local de rolzzo_personas: así el PIN de
+   todo el personal ya no se descarga al navegador antes (ni después) de un
+   login exitoso — la Edge Function usa la service_role key del lado
+   servidor y solo devuelve los datos de LA persona que coincide.
+   Devuelve {ok:true,persona} si el código es válido, o {ok:false,network}
+   donde network=true distingue "no se pudo verificar" (sin internet, Edge
+   Function caída) de network=false que es "código no reconocido" de verdad. */
+export async function validarPinServidor(codigo){
+  if(!sb)return{ok:false,network:true};
+  try{
+    const{data,error}=await sb.functions.invoke('validar-pin',{body:{codigo}});
+    if(error){console.error('Error validando PIN:',error);return{ok:false,network:true};}
+    if(data&&data.ok&&data.persona)return{ok:true,persona:data.persona};
+    return{ok:false,network:false};
+  }catch(e){
+    console.error('Error validando PIN:',e);
+    return{ok:false,network:true};
+  }
+}
+
 /* ---------- GUARDADO PUNTUAL (por fila) ----------
    Las tablas de uso diario (registros, unidades, evaluaciones) se guardan
    fila por fila con upsert/delete. Así, lo que guarda un usuario nunca
@@ -41,7 +83,7 @@ export function rowRegistro(r){return{
   nivel_dif:r.nivelDif||'',
   material:r.material,materiales:r.materiales||[],anclaje:r.anclaje,ubicacion:r.ubicacion,cod_motor:r.codMotor,
   calle:r.calle,numero:r.numero,region:r.region||null,comuna:r.comuna,
-  google:r.google,video:r.video,danos:r.danos,comentario_seguimiento:r.comentarioSeguimiento||'',
+  google:r.google,video:r.video,foto_video:r.fotoVideo||null,danos:r.danos,comentario_seguimiento:r.comentarioSeguimiento||'',
   problema:r.problema,solucion:r.solucion,que_sol:r.queSol,comentario:r.comentario,
   adjuntos:r.adjuntos||[],fotografos:r.fotografos||[],
   giftcard:r.giftcard||'No',giftcard_codigo:r.giftcardCodigo||'',giftcard_descuento:r.giftcardDescuento??null,
@@ -49,8 +91,25 @@ export function rowRegistro(r){return{
 };}
 export async function dbUpsertRegistro(r){
   if(!sbReady())return false;
-  try{const{error}=await sb.from('rolzzo_registros').upsert([rowRegistro(r)]);if(error)throw error;return true;}
-  catch(e){dbError('registro OT',e);return false;}
+  try{
+    const{error}=await sb.from('rolzzo_registros').upsert([rowRegistro(r)]);
+    if(error){
+      /* Si la tabla todavía no tiene la columna 'foto_video' (falta correr la
+         migración SQL que agrega el toggle "Foto y Video"), no se pierde el
+         resto del registro: se reintenta sin ese campo. */
+      const msg=(error.message||'').toLowerCase();
+      if(msg.includes('foto_video')){
+        console.warn('Falta la columna "foto_video" en rolzzo_registros (ver ALTER TABLE pendiente) — se guardó el resto del registro sin ese dato.');
+        const fallback=rowRegistro(r);
+        delete fallback.foto_video;
+        const r2=await sb.from('rolzzo_registros').upsert([fallback]);
+        if(r2.error)throw r2.error;
+        return true;
+      }
+      throw error;
+    }
+    return true;
+  }catch(e){dbError('registro OT',e);return false;}
 }
 export async function dbDeleteRegistro(id){
   if(!sbReady())return;
@@ -60,7 +119,7 @@ export async function dbDeleteRegistro(id){
 export function rowUnidad(u){return{
   id:u.id,fecha:u.fecha||null,mes:u.mes,conductor:u.conductor,patente:u.patente,
   kmi:u.kmi,kmf:u.kmf,total:u.total,comb:u.comb,recarga:u.recarga,monto:u.monto,pago:u.pago,
-  i1:u.i1,i2:u.i2,i3:u.i3,i4:u.i4,
+  i1:u.i1,i2:u.i2,i3:u.i3,i4:u.i4,integrantes:u.integrantes||[],
   creado_por:u.creadoPor||null,foto_path:u.fotoPath||null,
   foto_kmi_path:u.fotoKmiPath||null,foto_kmf_path:u.fotoKmfPath||null,
   tipo:u.tipo||null,fotos_km:u.fotosKm||[]
@@ -70,14 +129,13 @@ export async function dbUpsertUnidad(u){
   try{
     const{error}=await sb.from('rolzzo_unidades').upsert([rowUnidad(u)]);
     if(error){
-      /* Si la tabla todavía no tiene las columnas 'tipo' / 'fotos_km'
-         (falta correr la migración SQL), no se pierde el resto del
-         registro: se reintenta sin esos dos campos, igual que se hace
-         con 'detalle' en vehículos. */
+      /* Si la tabla todavía no tiene las columnas 'tipo' / 'fotos_km' /
+         'integrantes' (falta correr la migración SQL), no se pierde el
+         resto del registro: se reintenta sin esos campos. */
       const msg=(error.message||'').toLowerCase();
-      if(msg.includes('tipo')||msg.includes('fotos_km')||msg.includes('column')){
+      if(msg.includes('tipo')||msg.includes('fotos_km')||msg.includes('integrantes')||msg.includes('column')){
         const fallback=rowUnidad(u);
-        delete fallback.tipo;delete fallback.fotos_km;
+        delete fallback.tipo;delete fallback.fotos_km;delete fallback.integrantes;
         const r2=await sb.from('rolzzo_unidades').upsert([fallback]);
         if(r2.error)throw r2.error;
         return true;
@@ -238,7 +296,14 @@ export async function saveAll(){
     return true;
   }catch(e){dbError('personas / listas / vehículos',e);return false;}
 }
-export async function loadAll(){
+/* Carga rolzzo_personas (incluye el PIN de cada persona en "codigo") por
+   separado de loadAll(), y se llama SOLO después de un login exitoso (ver
+   doLogin() en login.js) — nunca en el arranque de la app, para que el PIN
+   de todo el personal no se descargue al navegador de alguien que todavía
+   no pasó el login. Una vez logueado, sí se necesita completa: nav.js la
+   usa para los permisos propios, personas.js para administrar al equipo y
+   evaluaciones.js para las capacitaciones de cada persona. */
+export async function loadPersonas(){
   try{
     const{data}=await sb.from('rolzzo_personas').select('*');
     if(data&&data.length){
@@ -249,7 +314,8 @@ export async function loadAll(){
       })));
     }
   }catch(e){console.error('Error cargando personas:',e);}
-
+}
+export async function loadAll(){
   try{
     const{data}=await sb.from('rolzzo_registros').select('*');
     if(data)__set_registros(data.map(r=>({
@@ -261,7 +327,7 @@ export async function loadAll(){
       nivelDif:r.nivel_dif||'',
       material:r.material,materiales:r.materiales||[],anclaje:r.anclaje,ubicacion:r.ubicacion,codMotor:r.cod_motor,
       calle:r.calle,numero:r.numero,region:r.region,comuna:r.comuna,
-      google:r.google,video:r.video,danos:r.danos,comentarioSeguimiento:r.comentario_seguimiento||'',
+      google:r.google,video:r.video,fotoVideo:r.foto_video||'No',danos:r.danos,comentarioSeguimiento:r.comentario_seguimiento||'',
       problema:r.problema,solucion:r.solucion,queSol:r.que_sol,comentario:r.comentario,
       adjuntos:r.adjuntos||[],fotografos:r.fotografos||[],
       giftcard:r.giftcard||'No',giftcardCodigo:r.giftcard_codigo||'',giftcardDescuento:r.giftcard_descuento??null,
@@ -274,7 +340,7 @@ export async function loadAll(){
     if(data)__set_unidades(data.map(u=>({
       id:u.id,fecha:u.fecha,mes:u.mes,conductor:u.conductor,patente:u.patente,
       kmi:u.kmi,kmf:u.kmf,total:u.total,comb:u.comb,recarga:u.recarga,monto:u.monto,pago:u.pago,
-      i1:u.i1,i2:u.i2,i3:u.i3,i4:u.i4,
+      i1:u.i1,i2:u.i2,i3:u.i3,i4:u.i4,integrantes:u.integrantes||[],
       creadoPor:u.creado_por,fotoPath:u.foto_path,fotoKmiPath:u.foto_kmi_path,fotoKmfPath:u.foto_kmf_path,
       tipo:u.tipo||'',fotosKm:u.fotos_km||[]
     })));
@@ -353,11 +419,11 @@ export let ultimoRegistroActividad=0;
   },{passive:true});
 });
 
-loadAll().then(()=>{
+ensureAnonSession().then(loadAll).then(async()=>{
   initRgValsDefaults();
   applyTheme(themeColor);
   populateForms();
-  const restored=tryRestoreSession();
+  const restored=await tryRestoreSession();
   if(!restored){
     document.getElementById('login-screen').style.display='flex';
     pinInputs[0].focus();

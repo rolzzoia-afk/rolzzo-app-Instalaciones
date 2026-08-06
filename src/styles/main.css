@@ -71,6 +71,9 @@ html,body{height:100%}
 
 .main{flex:1;min-width:0;height:100vh;overflow-y:auto}
 .topbar{background:var(--surface-2,#fff);border-bottom:0.5px solid var(--border,rgba(11,11,11,.1));padding:.9rem 1.5rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem}
+.topbar-user-badge{display:none;order:-1;width:100%;align-items:center;gap:6px;padding:.35rem .7rem;margin-bottom:.15rem;background:var(--brand);color:#fff;border-radius:8px;font-size:11.5px;font-weight:700}
+.topbar-user-badge i{font-size:14px;flex-shrink:0}
+.topbar-user-badge .topbar-user-role{opacity:.65;font-weight:600;text-transform:uppercase;font-size:9px;letter-spacing:.4px;margin-left:auto}
 .ot-global-wrap{flex-shrink:0}
 .ot-global-bar{display:flex;align-items:center;gap:8px;background:var(--surface-1,#f5f4f0);border:1px solid var(--border-strong,rgba(11,11,11,.15));border-radius:10px;padding:.35rem .4rem .35rem .7rem}
 .ot-global-bar i.ti-search,.ot-global-bar svg.ti-search{font-size:15px;color:var(--text-muted,#898781)}
@@ -233,6 +236,16 @@ input[type="text"]::placeholder,textarea::placeholder{text-transform:none}
 .filesrc-menu button:hover{background:var(--surface-2,rgba(11,11,11,.05))}
 .filesrc-menu button i{font-size:17px;color:#eda100;width:18px;text-align:center}
 .filesrc-overlay{position:fixed;inset:0;z-index:499}
+
+/* ---------- Combo escribible con sugerencias (ej. "Tipo de documento" en
+   Mantenciones) — reemplaza al <input list> nativo porque el datalist del
+   navegador anda muy inconsistente en Chrome Android (no filtra bien ni
+   se ve como un desplegable real). ---------- */
+.mant-combo-wrap{position:relative}
+.mant-combo-drop{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:60;background:var(--surface-1,#fff);border:1px solid var(--border,rgba(11,11,11,.14));border-radius:10px;box-shadow:0 12px 30px rgba(0,0,0,.18);max-height:220px;overflow-y:auto;padding:.3rem}
+.mant-combo-item{padding:.55rem .7rem;border-radius:7px;font-size:13px;font-weight:500;color:var(--text-primary);cursor:pointer}
+.mant-combo-item:hover,.mant-combo-item.hover{background:var(--surface-2,rgba(11,11,11,.06))}
+.mant-combo-empty{padding:.55rem .7rem;font-size:12px;color:var(--text-muted)}
 
 /* ---------- Mantenciones: botones de nombre + cuadro "vigente" ---------- */
 .mant-nombres-grid{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:.4rem}
@@ -415,6 +428,12 @@ body.edit-on .eval-add-row.edit-only{display:grid}
 .km-recorridos-card i{font-size:20px}
 .km-recorridos-card b{font-size:17px;font-weight:800}
 .km-recorridos-card.km-recorridos-warn{background:linear-gradient(135deg,#e34948,#a52a2a)}
+.km-input-big-wrap{display:flex;flex-direction:column;align-items:center;margin:.9rem 0 1.2rem}
+.km-input-big-label{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--brand,#2a78d6);margin-bottom:.6rem}
+.km-input-big-box{border:2.5px solid #1baf7a;border-radius:12px;padding:.4rem 1rem;width:100%;max-width:420px;background:var(--surface-2,#fff)}
+.km-input-big{width:100%;border:none;background:transparent;text-align:center;font-size:34px;font-weight:800;color:var(--text-primary);padding:.5rem 0}
+.km-input-big:focus{outline:none}
+.km-input-big::-webkit-inner-spin-button,.km-input-big::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
 .dash-kpi-row{cursor:pointer;transition:background .15s}
 .dash-kpi-row:hover{background:rgba(11,11,11,.03)}
 .dash-kpi-row td{position:relative}
@@ -603,6 +622,7 @@ body.edit-on .eval-add-row.edit-only{display:grid}
   .main{height:100vh;height:100dvh;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:80px}
   .app-content{padding:1.1rem}
   .topbar{padding:.85rem 1.1rem;position:sticky;top:0;z-index:20}
+  .topbar-user-badge{display:flex}
   .fg,.fg3,.fg4,.kpis,.cg2,.cg3{grid-template-columns:1fr 1fr}
   .color-grid{grid-template-columns:repeat(3,1fr)}
   .new-persona-row,.eval-add-row{grid-template-columns:1fr}
@@ -775,8 +795,10 @@ body.edit-on .eval-add-row.edit-only{display:grid}
 .finst-signature-wrap canvas{display:block;width:100%;touch-action:none;cursor:crosshair;background:#fff}
 .finst-sig-label{text-align:center;font-size:11px;font-weight:700;padding:.5rem 0;border-top:0.5px solid var(--border,rgba(11,11,11,.1))}
 .finst-sig-actions{display:flex;justify-content:center;margin-top:.5rem}
-.finst-ot-search{display:flex;gap:10px;align-items:center;background:var(--surface-2,#fff);border:1.5px solid var(--border-strong,rgba(11,11,11,.18));border-radius:12px;padding:.5rem .6rem .5rem 1.1rem;margin-bottom:1rem}
-.finst-ot-search input{border:none;flex:1;padding:9px 0;font-size:14px;background:transparent}
+.finst-ot-search{display:flex;gap:10px;align-items:center;background:#eaf2fd;border:1.5px solid #2a78d6;border-radius:12px;padding:.5rem .6rem .5rem 1.1rem;margin-bottom:1rem}
+.finst-ot-search i.ti-search,.finst-ot-search svg.ti-search{color:#2a78d6}
+.finst-ot-search input{border:none;flex:1;padding:9px 0;font-size:14px;background:transparent;color:#1b4d8a}
+.finst-ot-search input::placeholder{color:#5c8fc9}
 .finst-ot-search input:focus{outline:none;box-shadow:none}
 .finst-ot-found{display:flex;align-items:center;gap:10px;background:#e8f7f0;border:1px solid #1baf7a;border-radius:10px;padding:.7rem 1rem;margin-bottom:1rem;font-size:12.5px}
 .finst-ot-found i{color:#1baf7a;font-size:18px}

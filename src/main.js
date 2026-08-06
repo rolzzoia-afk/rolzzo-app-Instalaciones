@@ -29,7 +29,7 @@ import './modules/evaluaciones-pdf.js';
 import './modules/reporte-instalacion-catalogos.js';
 import './modules/reporte-instalacion-firma.js';
 import './modules/reporte-instalacion-selector-ot.js';
-import './modules/reporte-instalacion-pdf.js';
+import './modules/reporte-instalacion-overlay.js';
 import './modules/reporte-instalacion-whatsapp.js';
 import './modules/escaner-documentos.js';
 import './modules/escaner-edicion.js';

@@ -7,7 +7,7 @@ import { __set_efAcordeonOtAbierta, efAcordeonOtAbierta, renderEvalFotos } from 
 import { pdfCheckPageBreak, pdfDrawHeader, pdfDrawTitleBlock, pdfSectionBar } from './evaluaciones-pdf.js';
 import { anclajeLabel, g, nivelDifLabel, tecnicosList } from './form-helpers.js';
 import { ensureVehData } from './mantenciones-vehiculos.js';
-import { adjuntoUrl, forzarDescarga, iniciarEdicionOT } from './registro-adjuntos.js';
+import { adjuntoUrl, eliminarAdjuntoRegistro, forzarDescarga, iniciarEdicionOT, resetRegdetAdjuntosPendientes } from './registro-adjuntos.js';
 import { pdfAddPhotosPage } from './selector-foto-galeria.js';
 
 /* ===== Helpers de período (Mes actual / Semana actual / Año completo / Rango) ===== */
@@ -58,6 +58,31 @@ export function mesInputARango(valorMes){
   const hasta=`${y}-${_pad2(m)}-${_pad2(ultimoDia)}`;
   return{desde,hasta};
 }
+/* Opciones "YYYY-MM" para el selector de mes del Dashboard: desde 12 meses
+   atrás (o desde el registro más antiguo, si hay datos de antes de eso)
+   hasta 12 meses a futuro — así se puede elegir un mes que todavía no llega
+   y confirmar que, correctamente, no hay ningún dato ahí todavía. */
+export function opcionesMesDashboard(){
+  const hoy=new Date();
+  const fechasConDato=registros.filter(r=>r.fecha).map(r=>r.fecha).sort();
+  const minRegistro=fechasConDato.length?fechasConDato[0]:null;
+  let inicio=new Date(hoy.getFullYear(),hoy.getMonth()-12,1);
+  if(minRegistro){
+    const[y,m]=minRegistro.split('-').map(Number);
+    const inicioDatos=new Date(y,m-1,1);
+    if(inicioDatos<inicio)inicio=inicioDatos;
+  }
+  const fin=new Date(hoy.getFullYear(),hoy.getMonth()+12,1);
+  const opciones=[];
+  const cursor=new Date(fin);
+  while(cursor>=inicio){
+    const y=cursor.getFullYear(),m=cursor.getMonth()+1;
+    const nombre=MESES[m-1];
+    opciones.push({value:`${y}-${_pad2(m)}`,label:nombre.charAt(0)+nombre.slice(1).toLowerCase()+' '+y});
+    cursor.setMonth(cursor.getMonth()-1);
+  }
+  return opciones;
+}
 /* Devuelve la lista de registros aplicando técnico + fecha exacta + semana + mes,
    los tres filtros temporales combinables entre sí (se intersectan). Esta misma
    función alimenta la tabla en pantalla, el contador en vivo y las exportaciones. */
@@ -105,6 +130,14 @@ export function updateRegrepCounter(list,tec,fechaExacta,semanaVal,mesVal){
 export function renderRegReportes(){
   const filTecEl=g('regrep-fil-tec');
   if(filTecEl){const cur=filTecEl.value;filTecEl.innerHTML='<option value="">Todos</option>'+tecnicosList().map(t=>`<option value="${t}">${t}</option>`).join('');filTecEl.value=cur;}
+  /* Arranca mostrando el mes actual (no todo el histórico) — nada se
+     pierde, se puede limpiar el filtro para ver meses anteriores. */
+  const filMesEl=g('regrep-fil-mes');
+  if(filMesEl&&!filMesEl.dataset.defaulted){
+    filMesEl.dataset.defaulted='1';
+    const hoy=new Date();
+    filMesEl.value=`${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}`;
+  }
   const{list:listAsc,tec,fechaExacta,semanaVal,mesVal}=regrepFilteredList();
   updateRegrepCounter(listAsc,tec,fechaExacta,semanaVal,mesVal);
   const list=listAsc.slice().reverse();
@@ -141,6 +174,7 @@ export function getRegdetCurrentId(){return regdetCurrentId;}
 export function verDetalleRegistro(id){
   const r=registros.find(x=>x.id===id);if(!r)return;
   regdetCurrentId=id;
+  resetRegdetAdjuntosPendientes();
   const tecnicos=[r.tec1,r.tec2,r.tec3,r.tec4,...(r.tecnicosExtra||[])].filter(Boolean).join(', ')||'—';
   const extrasList=(r.extras&&r.extras.length)?r.extras:((r.adicional||r.tipoGar)?[{adicional:r.adicional,cantidad:'',tipoGar:r.tipoGar}]:[]);
   const extrasHtml=extrasList.length?
@@ -176,7 +210,7 @@ export function verDetalleRegistro(id){
     ['Material',materialesTxt],['Anclaje',anclajeLabel(r.anclaje)],
     ['Ubicación',r.ubicacion||'—'],['Código motor',r.codMotor||'—'],
     ['Calle',r.calle||'—'],['Número',r.numero||'—'],['Región',r.region||'—'],['Comuna',r.comuna||'—'],
-    ['Reseña Google',r.google||'—'],['Video',r.video||'—'],['Daños',r.danos||'—'],
+    ['Reseña Google',r.google||'—'],['Video Reseña',r.video||'—'],['Foto y Video',r.fotoVideo||'—'],['Daños',r.danos||'—'],
     ['Comentario de seguimiento',r.comentarioSeguimiento||'—'],
     ['Problema',r.problema||'—'],['Solución',r.solucion||'—'],['Qué se solucionó',r.queSol||'—'],
     ['Comentario',r.comentario||'—'],
@@ -196,13 +230,13 @@ export function verDetalleRegistro(id){
       adjEl.innerHTML='<p class="eval-empty" style="margin-top:.8rem">Sin documentos adjuntos para esta OT.</p>';
     }else{
       adjEl.innerHTML=`<p class="sec-lbl" style="margin-top:1rem">Documentos adjuntos (${adjuntos.length})</p><div class="ef-fotos-grid">`+
-        adjuntos.map(a=>{
+        adjuntos.map((a,i)=>{
           const url=adjuntoUrl(a);
           const isImg=(a.mimeType||'').startsWith('image/');
           const nombre=escapeHtml(a.nombreArchivo||'archivo');
           const media=isImg&&url?`<img src="${url}" alt="${nombre}" onclick="${url?`window.open('${url}','_blank')`:''}">`:
             `<div class="ef-foto-ph" onclick="${url?`window.open('${url}','_blank')`:''}"><i class="ti ti-file-type-pdf" aria-hidden="true"></i></div>`;
-          return `<div class="ef-foto-card">${media}<div class="ef-foto-meta"><span class="ef-foto-name" title="${nombre}">${nombre}</span></div><div style="display:flex;gap:6px;padding:0 7px 7px">
+          return `<div class="ef-foto-card">${media}<div class="ef-foto-meta"><span class="ef-foto-name" title="${nombre}">${nombre}</span><button class="btn-del" onclick="eliminarAdjuntoRegistro(${i})" title="Eliminar"><i class="ti ti-trash" aria-hidden="true"></i></button></div><div style="display:flex;gap:6px;padding:0 7px 7px">
             <button class="btn-sec btn-sm" style="flex:1" ${url?`onclick="window.open('${url}','_blank')"`:'disabled'}><i class="ti ti-eye" aria-hidden="true"></i> Ver en grande</button>
             <button class="btn-sec btn-sm" style="flex:1" ${url?`onclick="forzarDescarga('${url}','${nombre}')"`:'disabled'}><i class="ti ti-download" aria-hidden="true"></i> Descargar</button>
           </div></div>`;

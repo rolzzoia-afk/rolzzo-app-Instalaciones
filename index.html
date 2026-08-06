@@ -76,6 +76,11 @@
 
   <main class="main">
     <div class="topbar">
+      <div class="topbar-user-badge" id="topbar-user-badge">
+        <i class="ti ti-user-circle" aria-hidden="true"></i>
+        <span id="topbar-user-name">—</span>
+        <span class="topbar-user-role" id="topbar-user-role">—</span>
+      </div>
       <div class="topbar-title">
         <div class="chip" id="tb-chip"></div>
         <div><h1 id="tb-title">Registro</h1><span id="tb-sub">Nueva visita de instalación</span></div>
@@ -209,8 +214,12 @@
           <div class="rg" id="rg-google"><div class="ro" onclick="selRg('rg-google',this,'Si')">Sí</div><div class="ro sel" onclick="selRg('rg-google',this,'No')">No</div></div>
         </div>
         <div class="field">
-          <label>Video grabado</label>
+          <label>Video Reseña</label>
           <div class="rg" id="rg-video"><div class="ro" onclick="selRg('rg-video',this,'Si')">Sí</div><div class="ro sel" onclick="selRg('rg-video',this,'No')">No</div></div>
+        </div>
+        <div class="field">
+          <label>Foto y Video</label>
+          <div class="rg" id="rg-fotovideo"><div class="ro" onclick="selRg('rg-fotovideo',this,'Si')">Sí</div><div class="ro sel" onclick="selRg('rg-fotovideo',this,'No')">No</div></div>
         </div>
         <div class="field">
           <label>Daños</label>
@@ -308,6 +317,7 @@
         <div class="fg">
           <div class="field"><label>Nombre <span class="req-asterisk">*</span></label><input type="text" id="finst-nombre" placeholder="Nombre del cliente"></div>
           <div class="field"><label>OT N° <span class="req-asterisk">*</span></label><input type="text" id="finst-ot" placeholder="Ej: 12345"></div>
+          <div class="field"><label>RUT cliente</label><input type="text" id="finst-rut-cliente" placeholder="Ej: 12.345.678-9" oninput="formatearRutInput(this)"></div>
           <div class="field"><label>Teléfono</label><input type="tel" id="finst-telefono" placeholder="Ej: +56912345678"></div>
           <div class="field"><label>Fecha <span class="req-asterisk">*</span></label><input type="date" id="finst-fecha"></div>
           <div class="field"><label>E-mail</label><input type="email" id="finst-email" placeholder="cliente@correo.com"></div>
@@ -380,26 +390,21 @@
           <div class="field"><label>Fecha</label><input type="date" id="finst-fecha-conforme"></div>
         </div>
         <div class="fg" style="margin-top:1rem">
-          <div class="field">
+          <div class="field f1">
             <div class="finst-signature-wrap"><canvas id="finst-firma-cliente" height="160"></canvas></div>
-            <div class="finst-sig-label">Firma quien recibe el trabajo</div>
+            <div class="finst-sig-label">Firma cliente</div>
             <div class="finst-sig-actions"><button class="btn-sec" onclick="finstLimpiarFirma('finst-firma-cliente')"><i class="ti ti-eraser" aria-hidden="true"></i>Limpiar firma</button></div>
-          </div>
-          <div class="field">
-            <div class="finst-signature-wrap"><canvas id="finst-firma-instalador" height="160"></canvas></div>
-            <div class="finst-sig-label">Firma instalador encargado</div>
-            <div class="finst-sig-actions"><button class="btn-sec" onclick="finstLimpiarFirma('finst-firma-instalador')"><i class="ti ti-eraser" aria-hidden="true"></i>Limpiar firma</button></div>
           </div>
         </div>
       </div>
 
       <div class="finst-final-actions">
-        <button class="btn" onclick="finstGenerarPDF()"><i class="ti ti-file-type-pdf" aria-hidden="true"></i>Finalizar y generar PDF</button>
+        <button class="btn" id="finst-generar-btn" onclick="finstGenerarYGuardarPDF()"><i class="ti ti-file-type-pdf" aria-hidden="true"></i>Finalizar, firmar y guardar</button>
       </div>
       <div id="finst-post-pdf" style="display:none;margin-top:1rem">
         <div class="finst-ot-found" style="background:#eaf3ff;border-color:#2a78d6">
           <i class="ti ti-circle-check" aria-hidden="true" style="color:#2a78d6"></i>
-          <span>PDF generado y descargado. Ahora puedes enviarlo por WhatsApp (deberás adjuntar el archivo descargado manualmente en el chat que se abra).</span>
+          <span>Certificado firmado, descargado y guardado en la OT. Ahora puedes enviarlo por WhatsApp (deberás adjuntar el archivo descargado manualmente en el chat que se abra).</span>
         </div>
         <div class="finst-final-actions">
           <button class="btn finst-wa-btn" onclick="finstEnviarWhatsappCliente()"><i class="ti ti-brand-whatsapp" aria-hidden="true"></i>Enviar a WhatsApp del cliente</button>
@@ -437,14 +442,17 @@
           <label>Mes</label>
           <input type="text" id="u-mes" readonly style="background:var(--surface-1,#f5f4f0);color:var(--text-muted)">
         </div>
-        <div class="field">
-          <label>Tipo de registro</label>
-          <select id="u-tipo"></select>
-        </div>
-        <div class="field" style="grid-column:1/-1">
-          <div class="field"><label>Kilometraje actual</label><input type="number" id="u-km" placeholder="0" oninput="calcularKmRecorridos()"></div>
-          <p id="u-km-sugerido" style="font-size:11px;color:var(--text-muted);margin:.5rem 0 0"></p>
-        </div>
+      </div>
+      <div style="margin:.6rem 0 .875rem">
+        <p class="sec-lbl">¿Quiénes estaban en la camioneta hoy?</p>
+        <div id="uni-integrantes-rows"></div>
+      </div>
+      <div class="km-input-big-wrap">
+        <label class="km-input-big-label" for="u-km">Kilometraje</label>
+        <div class="km-input-big-box"><input type="number" id="u-km" placeholder="0" oninput="calcularKmRecorridos()" class="km-input-big"></div>
+        <p id="u-km-sugerido" style="font-size:11px;color:var(--text-muted);margin:.5rem 0 0;text-align:center"></p>
+      </div>
+      <div class="fg">
         <div class="field" style="grid-column:1/-1">
           <label>Foto del odómetro <span class="req-asterisk">*</span></label>
           <div id="u-foto-km-dz"></div>
@@ -456,7 +464,6 @@
           </div>
         </div>
       </div>
-      <button class="btn" onclick="guardarUnidad()" style="margin-top:1rem"><i class="ti ti-device-floppy" aria-hidden="true"></i>Guardar kilometraje</button>
       <div class="toast" id="toast-uni"><i class="ti ti-circle-check" aria-hidden="true"></i>Registro de unidad guardado.</div>
 
       <div class="sub-accordion-simple" style="margin-top:1.2rem">
@@ -485,11 +492,16 @@
           <div class="field" style="margin-top:.6rem"><label>Detalle de lo realizado</label><textarea id="u-detalle" rows="3" placeholder="Ej: Traslado a bodega central, sin novedades en el trayecto"></textarea></div>
         </div>
       </div>
+      <button class="btn" onclick="guardarUnidad()" style="margin-top:1.2rem"><i class="ti ti-device-floppy" aria-hidden="true"></i>Guardar Todo</button>
     </div>
     <div class="card" style="--sec-color:#eda100">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem;flex-wrap:wrap;gap:8px">
         <p class="card-title" style="margin:0"><i class="ti ti-list" aria-hidden="true"></i>Historial unidades</p>
-        <span id="uni-count" style="font-size:11px;color:var(--text-muted)">0 registros</span>
+        <div style="display:flex;align-items:center;gap:6px">
+          <label style="font-size:11px">Mes</label>
+          <select id="uni-fil-mes" onchange="renderUniTable()"></select>
+          <span id="uni-count" style="font-size:11px;color:var(--text-muted)">0 registros</span>
+        </div>
       </div>
       <div id="uni-table"></div>
     </div>
@@ -760,7 +772,6 @@
     <p class="obs-modal-title"><i class="ti ti-pencil" aria-hidden="true"></i>Editar registro de unidad</p>
     <div class="fg">
       <div class="field"><label>Fecha</label><input type="date" id="ue-fecha"></div>
-      <div class="field"><label>Tipo de registro</label><select id="ue-tipo"></select></div>
       <div class="field"><label>Conductor</label><select id="ue-conductor"></select></div>
       <div class="field"><label>Patente</label><select id="ue-patente"></select></div>
       <div class="field"><label>Combustible</label><select id="ue-comb"></select></div>
@@ -859,6 +870,21 @@
     <p class="obs-modal-title"><i class="ti ti-clipboard-list" aria-hidden="true"></i>Detalle de la OT</p>
     <div id="regdet-modal-body"></div>
     <div id="regdet-adjuntos"></div>
+    <div style="margin-top:1rem">
+      <p class="sec-lbl">Agregar documentos a esta OT</p>
+      <p style="font-size:11.5px;color:var(--text-muted);margin:0 0 .5rem">Útil si en terreno se cayó el internet y no se pudieron subir a tiempo: súbelos desde aquí.</p>
+      <div class="ot-dropzone" id="regdet-dz"
+        onclick="abrirSelectorArchivo(this,handleRegdetAdjuntosSelected)"
+        ondragover="event.preventDefault();this.classList.add('drag')"
+        ondragleave="this.classList.remove('drag')"
+        ondrop="event.preventDefault();this.classList.remove('drag');handleRegdetAdjuntosSelected(event.dataTransfer.files)">
+        <i class="ti ti-cloud-upload" aria-hidden="true"></i>
+        <p>Toca para elegir: cámara, galería o escanear</p>
+        <small>JPG, PNG o PDF · máximo 15MB por archivo</small>
+      </div>
+      <div id="regdet-adjuntos-pending"></div>
+      <button class="btn-sec" id="regdet-adjuntos-guardar-btn" style="margin-top:.6rem;width:100%;justify-content:center" onclick="guardarRegdetAdjuntos()"><i class="ti ti-device-floppy" aria-hidden="true"></i> Guardar documentos</button>
+    </div>
     <div style="text-align:center;margin-top:1rem">
       <button class="btn-deuna" id="regdet-btn-deuna" onclick="copiarResumenWhatsappDesdeRegistro(getRegdetCurrentId(),this)">DE UNA! ⚡</button>
       <p style="font-size:10.5px;color:var(--text-muted);margin-top:.6rem">Si el "DE UNA!" original falló o no se guardó bien el resumen, usa este botón para volver a copiarlo con los mismos datos y los mismos links de esta OT.</p>

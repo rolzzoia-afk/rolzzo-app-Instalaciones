@@ -2,12 +2,12 @@ import { sb } from './bootstrap.js';
 import { NAV_ITEMS, __set_currentTab, __set_navGroupOpen, __set_registros, __set_unidades, currentTab, navGroupOpen, otContext, personas, registros, session } from './core-data.js';
 import { renderDash, renderUniTable } from './dashboard-kpis.js';
 import { renderEstadoFlota } from './estado-flota.js';
-import { actualizarKmSugerido, renderUFotoKmDropzone, renderUTipoOptions } from './registro-adjuntos.js';
+import { actualizarKmSugerido, renderUFotoKmDropzone } from './registro-adjuntos.js';
 import { __set_evaluacionesFotos, __set_evaluacionesNuevo, loadEvalFotosOT } from './evaluaciones.js';
 import { __set_efAcordeonOtAbierta, __set_segResenaOtActiva, renderEvalFotos, renderEvalNuevo, renderSegResenas } from './evaluaciones-extra.js';
 import { renderSegReportes } from './exportacion-excel.js';
 import { renderMantenciones } from './flota-regla-modal.js';
-import { renderFotografosRows } from './form-tecnicos-extra.js';
+import { renderFotografosRows, renderUniIntegrantesRows } from './form-tecnicos-extra.js';
 import { renderAdmin } from './listas-admin.js';
 import { confirmLogout, logout } from './login.js';
 import { renderRegReportes } from './periodo-helpers.js';
@@ -130,7 +130,7 @@ export function sw(t){
   if(t==='regnew')renderFotografosRows();
   if(t==='reg_formulario')finstInitPane();
   if(t==='dash')renderDash();
-  if(t==='unireg'){renderUniregChips();renderUniTable();actualizarKmSugerido();renderUTipoOptions();renderUFotoKmDropzone();}
+  if(t==='unireg'){renderUniregChips();renderUniTable();actualizarKmSugerido();renderUFotoKmDropzone();renderUniIntegrantesRows();}
   if(t==='unimant')renderMantenciones();
   if(t==='uniflota')renderEstadoFlota();
   if(t==='unirep')renderReportes();
@@ -180,7 +180,7 @@ export async function refreshDatosCompartidos(){
       nivelDif:r.nivel_dif||'',
       material:r.material,materiales:r.materiales||[],anclaje:r.anclaje,ubicacion:r.ubicacion,codMotor:r.cod_motor,
       calle:r.calle,numero:r.numero,region:r.region,comuna:r.comuna,
-      google:r.google,video:r.video,danos:r.danos,comentarioSeguimiento:r.comentario_seguimiento||'',
+      google:r.google,video:r.video,fotoVideo:r.foto_video||'No',danos:r.danos,comentarioSeguimiento:r.comentario_seguimiento||'',
       problema:r.problema,solucion:r.solucion,queSol:r.que_sol,comentario:r.comentario,
       adjuntos:r.adjuntos||[],fotografos:r.fotografos||[],
       giftcard:r.giftcard||'No',giftcardCodigo:r.giftcard_codigo||'',giftcardDescuento:r.giftcard_descuento??null,
@@ -189,7 +189,7 @@ export async function refreshDatosCompartidos(){
     if(uni.data)__set_unidades(uni.data.map(u=>({
       id:u.id,fecha:u.fecha,mes:u.mes,conductor:u.conductor,patente:u.patente,
       kmi:u.kmi,kmf:u.kmf,total:u.total,comb:u.comb,recarga:u.recarga,monto:u.monto,pago:u.pago,
-      i1:u.i1,i2:u.i2,i3:u.i3,i4:u.i4,
+      i1:u.i1,i2:u.i2,i3:u.i3,i4:u.i4,integrantes:u.integrantes||[],
       creadoPor:u.creado_por,fotoPath:u.foto_path,fotoKmiPath:u.foto_kmi_path,fotoKmfPath:u.foto_kmf_path
     })));
     if(ef.data)__set_evaluacionesFotos(ef.data.map(e=>({id:e.id,ot:e.ot,persona:e.persona,fecha:e.fecha,mes:e.mes,nivel:e.nivel})));

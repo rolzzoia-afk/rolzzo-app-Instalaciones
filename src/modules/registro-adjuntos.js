@@ -7,10 +7,10 @@ import { renderSegResenas } from './evaluaciones-extra.js';
 import { __set_extraRows, extraRows, extrasValidos, renderExtraRows } from './form-adicionales-garantia.js';
 import { actualizarCamposGiftcard, actualizarWhatsappRegistro, calcDur, fillSel, g, selRg, toggleAnclaje } from './form-helpers.js';
 import { __set_productoRows, productoRows, productosValidos, renderProductoRows } from './form-productos.js';
-import { __set_fotografos, __set_materialRows, __set_tecnicosExtra, fotografos, fotografosValidos, materialRows, materialesValidos, renderFotografosRows, renderMaterialRows, renderTecnicosExtra, resetFotografos, resetMaterialRows, tecnicosExtra, tecnicosExtraValidos } from './form-tecnicos-extra.js';
+import { __set_fotografos, __set_materialRows, __set_tecnicosExtra, fotografos, fotografosValidos, materialRows, materialesValidos, renderFotografosRows, renderMaterialRows, renderTecnicosExtra, resetFotografos, resetMaterialRows, resetUniIntegrantes, tecnicosExtra, tecnicosExtraValidos, uniIntegrantesValidos } from './form-tecnicos-extra.js';
 import { kmActualVeh } from './mantenciones-vehiculos.js';
 import { sw } from './nav.js';
-import { renderRegReportes, verDetalleRegistro } from './periodo-helpers.js';
+import { getRegdetCurrentId, mesInputARango, renderRegReportes, verDetalleRegistro } from './periodo-helpers.js';
 import { populateComunasForRegion } from './regiones-comunas.js';
 import { currentUserName } from './reportes-unidad.js';
 import { comprimirImagenSiHaceFalta, limpiarPreviewArchivo } from './selector-foto-galeria.js';
@@ -61,13 +61,11 @@ export function renderRegAdjuntosPendientes(){
   }).join('')+'</div>';
 }
 export function removeRegAdjuntoPendiente(i){regAdjuntosPendientes.splice(i,1);renderRegAdjuntosPendientes();}
-export async function subirRegAdjuntosPendientes(ot){
-  if(!regAdjuntosPendientes.length)return[];
-  if(!sbReady())return[];
+async function subirArchivosGenerico(files,ot){
   const by=currentUserName();
   const subidos=[];
   const fallidos=[];
-  for(let file of regAdjuntosPendientes){
+  for(let file of files){
     if(file.size>15*1024*1024){fallidos.push(`${file.name} (supera 15MB)`);continue;}
     file=await comprimirImagenSiHaceFalta(file);
     const id=Date.now()+'_'+Math.random().toString(36).slice(2,7);
@@ -82,6 +80,12 @@ export async function subirRegAdjuntosPendientes(ot){
       fallidos.push(`${file.name} (${detalle})`);
     }
   }
+  return{subidos,fallidos};
+}
+export async function subirRegAdjuntosPendientes(ot){
+  if(!regAdjuntosPendientes.length)return[];
+  if(!sbReady())return[];
+  const{subidos,fallidos}=await subirArchivosGenerico(regAdjuntosPendientes,ot);
   regAdjuntosPendientes=[];
   renderRegAdjuntosPendientes();
   if(fallidos.length){
@@ -89,6 +93,70 @@ export async function subirRegAdjuntosPendientes(ot){
       '\n\nEl resto del registro se guardó igual. Revisa en Supabase que exista el bucket "registro-adjuntos" (Storage) y que tenga permisos de subida (policy INSERT) para usuarios autenticados/anónimos.');
   }
   return subidos;
+}
+/* ===== Agregar documentos a una OT YA guardada, desde el detalle (útil
+   cuando en terreno se cayó el internet y no se pudieron subir a tiempo) ===== */
+export let regdetAdjuntosPendientes=[];
+export function handleRegdetAdjuntosSelected(fileList){
+  [...fileList].forEach(f=>regdetAdjuntosPendientes.push(f));
+  renderRegdetAdjuntosPendientes();
+}
+export function renderRegdetAdjuntosPendientes(){
+  const el=g('regdet-adjuntos-pending');
+  if(!el)return;
+  if(!regdetAdjuntosPendientes.length){el.innerHTML='';return;}
+  el.innerHTML='<div class="ot-pending-grid">'+regdetAdjuntosPendientes.map((f,i)=>{
+    const isPdf=f.type==='application/pdf';
+    const inner=isPdf?`<div class="ot-pending-file" style="background:#7A1F1F"><span class="ext">PDF</span><span class="fname">${escapeHtml(f.name)}</span></div>`:`<img src="${URL.createObjectURL(f)}">`;
+    return `<div class="ot-pending-card">${inner}<button class="rm" onclick="removeRegdetAdjuntoPendiente(${i})" title="Quitar"></button></div>`;
+  }).join('')+'</div>';
+}
+export function removeRegdetAdjuntoPendiente(i){regdetAdjuntosPendientes.splice(i,1);renderRegdetAdjuntosPendientes();}
+export function resetRegdetAdjuntosPendientes(){regdetAdjuntosPendientes.length=0;renderRegdetAdjuntosPendientes();}
+export async function guardarRegdetAdjuntos(){
+  if(!regdetAdjuntosPendientes.length)return;
+  const id=getRegdetCurrentId();
+  const r=registros.find(x=>x.id===id);
+  if(!r||!sbReady())return;
+  const btn=g('regdet-adjuntos-guardar-btn');
+  if(btn){btn.disabled=true;btn.innerHTML='<i class="ti ti-cloud-upload" aria-hidden="true"></i> Subiendo...';}
+  const{subidos,fallidos}=await subirArchivosGenerico(regdetAdjuntosPendientes,r.ot);
+  regdetAdjuntosPendientes=[];
+  renderRegdetAdjuntosPendientes();
+  if(subidos.length){
+    /* Se relee 'adjuntos' desde la base justo antes de guardar (en vez de
+       confiar solo en r.adjuntos, que pudo quedar desactualizado en memoria)
+       para no perder documentos subidos por otra persona mientras tanto. */
+    let base=r.adjuntos||[];
+    try{
+      const{data}=await sb.from('rolzzo_registros').select('adjuntos').eq('id',id).single();
+      if(data&&data.adjuntos)base=data.adjuntos;
+    }catch(e){/* si falla, se sigue con lo que había en memoria */}
+    r.adjuntos=[...base,...subidos];
+    await dbUpsertRegistro(r);
+    verDetalleRegistro(id);
+  }
+  if(btn){btn.disabled=false;btn.innerHTML='<i class="ti ti-device-floppy" aria-hidden="true"></i> Guardar documentos';}
+  if(fallidos.length){
+    alert('No se pudieron subir estos archivos adjuntos:\n\n'+fallidos.join('\n')+
+      '\n\nEl resto se guardó igual.');
+  }
+}
+/* Elimina un documento YA guardado de una OT (incluye los certificados
+   generados desde Formulario, que se guardan en este mismo arreglo). */
+export async function eliminarAdjuntoRegistro(idx){
+  const id=getRegdetCurrentId();
+  const r=registros.find(x=>x.id===id);
+  if(!r)return;
+  const doc=(r.adjuntos||[])[idx];
+  if(!doc)return;
+  if(!confirm(`¿Eliminar "${doc.nombreArchivo||'este documento'}"? Esta acción no se puede deshacer.`))return;
+  const prev=r.adjuntos;
+  r.adjuntos=r.adjuntos.filter((_,i)=>i!==idx);
+  const ok=await dbUpsertRegistro(r);
+  if(!ok){r.adjuntos=prev;return;}
+  if(doc.storagePath&&sb)sb.storage.from('registro-adjuntos').remove([doc.storagePath]).catch(()=>{});
+  verDetalleRegistro(id);
 }
 export async function forzarDescarga(url,nombre){
   try{
@@ -166,7 +234,23 @@ export function joinProbField(key){
   if(vals.length<=1)return vals[0]||'';
   return vals.map((v,i)=>`${i+1}- ${v}`).join(' / ');
 }
+/* Evita duplicados por doble clic o doble tap en "Guardar registro": sin este
+   freno, dos clics rápidos (o un click que no pareció responder al toque en
+   el celular y la persona vuelve a tocar) alcanzan a crear DOS filas con el
+   mismo OT/técnicos/fecha antes de que la primera termine de guardarse —
+   cada una cuenta aparte en el dashboard y el ranking de técnicos, inflando
+   las visitas de esa persona de cara al cálculo de sueldo. */
+let guardandoRegistro=false;
 export async function guardar(){
+  if(guardandoRegistro)return;
+  guardandoRegistro=true;
+  try{
+    await guardarInterno();
+  }finally{
+    guardandoRegistro=false;
+  }
+}
+async function guardarInterno(){
   if(regEditingId){return guardarEdicionOT();}
   const ot=g('f-ot').value;
   if(!ot||!ot.trim()){alert('Debes ingresar el N° de OT antes de guardar.');return;}
@@ -197,7 +281,7 @@ export async function guardar(){
     ubicacion:g('f-ubic').value,codMotor:g('f-codmotor').value,
     calle:g('f-calle').value,numero:g('f-numero').value,
     region:g('f-region').value,comuna:g('f-comuna').value,
-    google:rgVals['rg-google']||'No',video:rgVals['rg-video']||'No',danos:rgVals['rg-danos']||'No',
+    google:rgVals['rg-google']||'No',video:rgVals['rg-video']||'No',fotoVideo:rgVals['rg-fotovideo']||'No',danos:rgVals['rg-danos']||'No',
     comentarioSeguimiento:g('f-seg-comentario').value,
     problema:joinProbField('problema'),solucion:joinProbField('solucion'),queSol:joinProbField('quesol'),
     comentario:g('f-comentario').value,adjuntos,
@@ -269,7 +353,7 @@ export function registroToDraftFields(r){
     },
     rgVals:{
       'rg-tipo':r.tipo||'Instalación','rg-niveldif':r.nivelDif||'MEDIO','rg-anclaje':r.anclaje||'',
-      'rg-giftcard':r.giftcard||'No','rg-google':r.google||'No','rg-video':r.video||'No','rg-danos':r.danos||'No'
+      'rg-giftcard':r.giftcard||'No','rg-google':r.google||'No','rg-video':r.video||'No','rg-fotovideo':r.fotoVideo||'No','rg-danos':r.danos||'No'
     },
     productoRows:(r.productos&&r.productos.length)?r.productos.map(p=>({tipo:p.tipo||'',cantidad:p.cantidad||'',codigo:p.codigo||''})):[{tipo:'',cantidad:'',codigo:''}],
     extraRows:(r.extras&&r.extras.length)?r.extras.map(e=>({adicional:e.adicional||'',cantidad:e.cantidad||'',tipoGar:e.tipoGar||''})):[{adicional:'',tipoGar:''}],
@@ -344,7 +428,7 @@ export async function guardarEdicionOT(){
     ubicacion:g('f-ubic').value,codMotor:g('f-codmotor').value,
     calle:g('f-calle').value,numero:g('f-numero').value,
     region:g('f-region').value,comuna:g('f-comuna').value,
-    google:rgVals['rg-google']||'No',video:rgVals['rg-video']||'No',danos:rgVals['rg-danos']||'No',
+    google:rgVals['rg-google']||'No',video:rgVals['rg-video']||'No',fotoVideo:rgVals['rg-fotovideo']||'No',danos:rgVals['rg-danos']||'No',
     comentarioSeguimiento:g('f-seg-comentario').value,
     problema:joinProbField('problema'),solucion:joinProbField('solucion'),queSol:joinProbField('quesol'),
     comentario:g('f-comentario').value,adjuntos,
@@ -486,7 +570,7 @@ export function applyRegDraftToForm(draft){
 /* Limpia el formulario a un estado en blanco, sin guardar nada. */
 export function blankRegForm(){
   rgVals['rg-tipo']='Instalación';rgVals['rg-niveldif']='MEDIO';rgVals['rg-anclaje']='TECHO';
-  rgVals['rg-google']='No';rgVals['rg-video']='No';rgVals['rg-danos']='No';rgVals['rg-giftcard']='No';
+  rgVals['rg-google']='No';rgVals['rg-video']='No';rgVals['rg-fotovideo']='No';rgVals['rg-danos']='No';rgVals['rg-giftcard']='No';
   applyRegDraftToForm({fields:{},rgVals:{...rgVals}});
   resetMaterialRows();
   resetFotografos();
@@ -582,7 +666,7 @@ export async function armarTextoResumenWhatsapp(r){
     return `${p.tipo}${cod?' - Cód: '+cod:''}${p.cantidad?' ('+p.cantidad+' un.)':''}`;
   });
   const telas=formatListaWhatsapp(telasLista);
-  const video=r.video==='Si'?(instaladoresLista[0]||'Sí').trim():'No';
+  const fotoVideo=r.fotoVideo==='Si'?((r.fotografos&&r.fotografos.length)?formatListaWhatsapp(r.fotografos):'Sí'):'No';
   const google=r.google==='Si'?'Enviado':'No';
   const extras=(r.extras&&r.extras.length)?r.extras:[];
   const adicionalUpper=extras.map(e=>e.adicional).filter(Boolean).join(', ').toUpperCase();
@@ -614,7 +698,7 @@ export async function armarTextoResumenWhatsapp(r){
 6.🛠️ Instaladores: ${instaladores}
 7.📜 Telas: ${telas}
 8.🧰 Adicional / Garantía: ${extrasDetalle}
-9.📷 Fotos y video: ${video}
+9.📷 Fotos y video: ${fotoVideo}
 10.💻 Link de google: ${google}
 11.👉🏼Se deja router: ${router}
 12.🪟Cambio de manilla: No
@@ -659,7 +743,8 @@ export async function copiarResumenWhatsapp(){
       cliente:g('f-cliente').value,tipo:rgVals['rg-tipo']||'',
       tec1:g('f-tec1').value,tec2:g('f-tec2').value,tec3:g('f-tec3').value,tec4:g('f-tec4').value,
       tecnicosExtra:tecnicosExtraValidos(),
-      productos:productosValidos(),video:rgVals['rg-video']||'No',google:rgVals['rg-google']||'No',
+      productos:productosValidos(),video:rgVals['rg-video']||'No',fotoVideo:rgVals['rg-fotovideo']||'No',
+      fotografos:fotografosValidos(),google:rgVals['rg-google']||'No',
       extras:extrasValidos(),
       problema:joinProbField('problema'),
       comuna:g('f-comuna').value,comentario:g('f-comentario').value,
@@ -848,10 +933,12 @@ export function enviarInvitacionRegistro(){
 export function kmBaseUnireg(){
   return uniregSelected?(kmActualVeh(uniregSelected)||0):0;
 }
-/* Precarga "Kilometraje actual" con el último registrado para la patente
-   elegida (si el campo está vacío, para no pisar lo que la persona ya
-   escribió) y muestra de dónde salió ese número. Se llama al elegir
-   patente y al entrar a la pestaña. */
+/* Muestra el último kilometraje registrado como GUÍA de texto debajo del
+   recuadro grande, pero ya NO lo escribe dentro del campo — jefatura pidió
+   que el recuadro quede siempre vacío para una entrada nueva (antes, si
+   volvían a esa patente, aparecía el número anterior metido en la caja y
+   parecía un dato ya cargado). Se llama al elegir patente y al entrar a
+   la pestaña. */
 export function actualizarKmSugerido(){
   const hint=g('u-km-sugerido');
   const kmEl=g('u-km');
@@ -859,7 +946,6 @@ export function actualizarKmSugerido(){
   const base=kmBaseUnireg();
   if(base>0){
     hint.textContent='Sugerido según el último registro: '+base.toLocaleString('es-CL')+' km. Ajústalo si el odómetro marca otra cosa.';
-    if(!kmEl.value)kmEl.value=base;
   }else{
     hint.textContent='Sin registros previos para esta patente — ingresa el kilometraje que marca el odómetro.';
   }
@@ -917,21 +1003,6 @@ export async function subirFotoUnidad(u,inputId,carpeta){
     return null;
   }
 }
-/* Lista combinada de "tipo de registro" para el kilometraje diario: el
-   catálogo de mantenciones + el de documentos del vehículo, unificados en
-   uno solo (mismo catálogo que usa "Otras mantenciones y documentos" en
-   Mantenciones), más una primera opción para el registro normal de todos
-   los días. Así, si un técnico aprovecha este mismo formulario para dejar
-   respaldo de una mantención (ej: boleta de cambio de aceite), queda
-   clasificado igual que en el resto de la app. */
-export function tiposRegistroKm(){
-  const combinados=[...new Set([...(lists.mantNombres||[]),...(lists.docTypes||[])])];
-  return ['Registro de kilometraje',...combinados];
-}
-export function renderUTipoOptions(){
-  fillSel('u-tipo',tiposRegistroKm(),'');
-  if(g('u-tipo')&&!g('u-tipo').value)g('u-tipo').value='Registro de kilometraje';
-}
 /* Reemplaza el <input type="file"> único de la foto del odómetro por la
    misma dropzone (cámara / galería / escanear, varias fotos a la vez) que
    usa Registro de OT y Mantenciones — jefatura pidió que se vea y funcione
@@ -949,25 +1020,36 @@ export function renderUFotoKmDropzone(){
    PDF, Excel, Estado de Flota) sigue funcionando sin cambios. */
 export async function guardarUnidad(){
   const km=parseInt(g('u-km').value)||0;
-  const tipo=g('u-tipo')?g('u-tipo').value:'Registro de kilometraje';
+  const fecha=g('u-fecha').value;
   const fotosPendientes=adjPendientes['kmfoto']||[];
   if(!uniregSelected){alert('Selecciona una patente arriba antes de guardar.');return;}
+  /* Una sola vez al día por patente: se revisa ANTES de pedir foto/kilometraje
+     para no hacer perder tiempo con eso si el registro va a rechazarse igual.
+     Es un bloqueo total, no un aviso que se pueda pasar por alto — para
+     corregir un dato mal ingresado hay que usar "Editar" en el historial de
+     abajo, no crear un segundo registro del mismo día. */
+  const yaRegistradoHoy=unidades.some(u=>u.patente===uniregSelected&&u.fecha===fecha);
+  if(yaRegistradoHoy){
+    alert('Ya ingresaste el kilometraje de hoy para la patente '+uniregSelected+'.\n\nRecuerda: el registro de kilometraje es UNA VEZ AL DÍA POR PATENTE. Si necesitas corregirlo, usa "Editar" en el historial de abajo.');
+    return;
+  }
   if(!km){alert('Ingresa el kilometraje que marca el odómetro.');return;}
   if(!fotosPendientes.length){alert('La foto del odómetro es obligatoria.');return;}
   const kmi=kmBaseUnireg();
   if(kmi>0&&km<kmi){alert('El kilometraje ingresado ('+km.toLocaleString('es-CL')+' km) es menor al último registrado para esta patente ('+kmi.toLocaleString('es-CL')+' km). Revisa la foto del odómetro antes de guardar.');return;}
-  const u={id:Date.now(),fecha:g('u-fecha').value,mes:g('u-mes').value,tipo,
+  const u={id:Date.now(),fecha,mes:g('u-mes').value,
     conductor:g('u-conductor').value,patente:uniregSelected,
     kmi,kmf:km,total:kmi>0?km-kmi:0,comb:rgVals['rg-comb']||'',recarga:rgVals['rg-recarga']||'',
     monto:parseInt(g('u-monto').value)||0,pago:g('u-pago').value,
-    /* Los campos de integrantes ya no se piden en el formulario, pero se
-       mantienen en el modelo de datos por compatibilidad con registros
-       antiguos (PDF/Excel siguen mostrando el dato si algún registro ya
-       lo tenía). Los inputs u-i1..u-i4 ya no existen en el DOM. */
+    /* i1..i4 quedan vacíos: son los campos viejos (máx. 4 personas, uno por
+       input) que ya no se piden en el formulario, mantenidos solo por
+       compatibilidad con registros antiguos. Los integrantes de hoy se
+       guardan en 'integrantes' (pastillas, sin límite de cantidad). */
     i1:'',i2:'',i3:'',i4:'',
+    integrantes:uniIntegrantesValidos(),
     detalle:g('u-detalle').value,
     creadoPor:currentUserName(),fotoPath:null,fotoKmiPath:null,fotoKmfPath:null,fotosKm:[]};
-  await subirArchivosACola(uniregSelected,fotosPendientes,tipo,u.fotosKm);
+  await subirArchivosACola(uniregSelected,fotosPendientes,'Registro de kilometraje',u.fotosKm);
   if(u.fotosKm.length)u.fotoKmfPath=u.fotosKm[0].storagePath;
   const fileInput=g('u-foto');
   let file=fileInput&&fileInput.files[0];
@@ -992,7 +1074,7 @@ export async function guardarUnidad(){
   if(fileInput)fileInput.value='';
   limpiarAdjPendientes('kmfoto');
   limpiarPreviewArchivo('u-foto');
-  renderUTipoOptions();
+  resetUniIntegrantes();
   actualizarKmSugerido();
   renderUniTable();
 }
@@ -1032,13 +1114,13 @@ export function mostrarToastBar(msg){
   toastBarTimer=setTimeout(()=>bar.classList.remove('show'),3200);
 }
 export function filtered(){
-  const mes=g('fil-mes')?.value||'';
+  const rangoMes=mesInputARango(g('fil-mes')?.value||'');
   const tec=g('fil-tec')?.value||'';
   const fecha=g('fil-fecha')?.value||'';
   const tipo=g('fil-tipo')?.value||'';
   return registros.filter(r=>{
     if(!isAdminUser()&&!esMiOT(r))return false;
-    if(mes&&r.mes!==mes)return false;
+    if(rangoMes.desde&&(!r.fecha||r.fecha<rangoMes.desde||r.fecha>rangoMes.hasta))return false;
     if(tec&&r.tec1!==tec&&r.tec2!==tec&&r.tec3!==tec&&r.tec4!==tec)return false;
     if(fecha&&r.fecha!==fecha)return false;
     if(tipo&&r.tipo!==tipo)return false;
@@ -1049,14 +1131,34 @@ export function filtered(){
 export function clearFil(){g('fil-mes').value='';g('fil-tec').value='';g('fil-fecha').value='';g('fil-tipo').value='';renderDash();}
 
 export const CHART_COLORS=['#2a78d6','#1baf7a','#eda100','#4a3aa7','#e34948','#e87ba4','#eb6834','#008300','#00897B','#546E7A'];
+/* Reseñas de Google (y cualquier otro dato que sea propiedad de la OT
+   completa, no de cada visita suelta) hay que contarlos UNA sola vez por
+   OT, no una vez por fila de registros. Si una misma OT tiene más de una
+   fila — una garantía posterior, o un guardado duplicado por doble clic —
+   sin este filtro cualquier métrica que dependa de evalFotosOT[ot] queda
+   inflada tantas veces como filas tenga esa OT. Se usa la visita MÁS
+   ANTIGUA de cada OT como representante, porque normalmente es la que
+   gestionó la reseña; así no se le atribuye a quien hizo una visita
+   posterior sobre la misma OT. */
+export function dedupeOtPrimeraVisita(data){
+  const primeraVisitaPorOt={};
+  data.forEach(r=>{
+    if(!r.ot)return;
+    const prev=primeraVisitaPorOt[r.ot];
+    if(!prev||(r.id||0)<(prev.id||0))primeraVisitaPorOt[r.ot]=r;
+  });
+  return data.filter(r=>r.ot&&primeraVisitaPorOt[r.ot]===r);
+}
 export function calcRankingTecnicos(data){
   const stats={};
+  const filasRepresentantes=new Set(dedupeOtPrimeraVisita(data));
   data.forEach(r=>{
+    const esRepresentanteGoogle=filasRepresentantes.has(r);
     [r.tec1,r.tec2,r.tec3,r.tec4].filter(Boolean).forEach(t=>{
       if(!stats[t])stats[t]={total:0,sinProblema:0,google:0};
       stats[t].total++;
       if(!r.problema||r.problema.toUpperCase().includes('NINGUNO'))stats[t].sinProblema++;
-      if(evalFotosOT[r.ot]&&evalFotosOT[r.ot].googleReview)stats[t].google++;
+      if(esRepresentanteGoogle&&evalFotosOT[r.ot]&&evalFotosOT[r.ot].googleReview)stats[t].google++;
     });
   });
   return Object.keys(stats).map(t=>{

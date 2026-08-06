@@ -19,11 +19,24 @@ export function getFlotaEditId(){return flotaEditId;}
    - modo 'km': se compara contra el kilometraje actual de la patente (kmActualVeh).
    - modo 'tiempo': se compara contra la fecha de hoy.
    Ambos guardan opcionalmente el otro dato por si se quiere mostrar, pero el
-   cálculo del semáforo usa solo el modo elegido. */
+   cálculo del semáforo usa solo el modo elegido.
+
+   Desde que Mantenciones pasó a ser un historial (cada subida agrega una
+   fila nueva a reglasMant en vez de sobreescribir una ficha única), puede
+   haber más de una fila con el mismo "desc" (ej. "Cambio de Aceite" hecho
+   dos veces). reglaMasReciente() devuelve la fila más nueva de un tipo, y
+   reglasFlota() usa eso para que Estado de Flota siempre muestre el estado
+   ACTUAL de cada tipo de mantención, no todo el historial repetido. */
+export function reglaMasReciente(reglas,desc){
+  const coincidencias=(reglas||[]).filter(r=>r.desc===desc);
+  if(!coincidencias.length)return null;
+  return coincidencias.slice().sort((a,b)=>(a.ultimaFecha||'').localeCompare(b.ultimaFecha||''))[coincidencias.length-1];
+}
 export function reglasFlota(patente){
   const vd=ensureVehData(patente);
   if(!vd.reglasMant)vd.reglasMant=[];
-  return vd.reglasMant;
+  const nombres=[...new Set(vd.reglasMant.map(r=>r.desc))];
+  return nombres.map(desc=>reglaMasReciente(vd.reglasMant,desc)).filter(Boolean);
 }
 /* Calcula % de vida restante, texto de "pendiente" y "restante", y color
    del semáforo para una regla concreta. Cortes de color:

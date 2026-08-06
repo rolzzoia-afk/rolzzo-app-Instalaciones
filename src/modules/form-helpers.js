@@ -2,6 +2,7 @@ import { MESES, lists, personas, rgVals } from './core-data.js';
 import { renderExtraRows } from './form-adicionales-garantia.js';
 import { renderProductoRows } from './form-productos.js';
 import { renderFotografosRows, renderMaterialRows, renderTecnicosExtra } from './form-tecnicos-extra.js';
+import { opcionesMesDashboard } from './periodo-helpers.js';
 import { populateRegiones } from './regiones-comunas.js';
 import { renderProblemasRows, scheduleRegDraftSave } from './registro-adjuntos.js';
 import { convertirInputFileConSelector } from './selector-foto-galeria.js';
@@ -85,6 +86,7 @@ export function initRgValsDefaults(){
   rgVals['rg-giftcard']='No';
   rgVals['rg-google']='No';
   rgVals['rg-video']='No';
+  rgVals['rg-fotovideo']='No';
   rgVals['rg-danos']='No';
   rgVals['rg-comb']='FULL';
   rgVals['rg-recarga']='NO';
@@ -111,6 +113,17 @@ export function calcDur(){
   if(min<0){el.textContent='La hora de salida es anterior al inicio.';return;}
   const h=Math.floor(min/60),m=min%60;
   el.textContent=`Duración: ${h>0?h+' h ':' '}${m} min (${min} minutos total)`;
+}
+/* Formatea un RUT chileno a medida que se escribe: el usuario solo tipea
+   los dígitos (y opcionalmente la K), y el campo se acomoda solo con puntos
+   de miles y el guión antes del dígito verificador (ej: 123456785 → 12.345.678-5). */
+export function formatearRutInput(el){
+  let v=(el.value||'').replace(/[^0-9kK]/g,'').toUpperCase();
+  if(v.length>9)v=v.slice(0,9);
+  if(v.length<=1){el.value=v;return;}
+  const cuerpo=v.slice(0,-1),dv=v.slice(-1);
+  const cuerpoFmt=cuerpo.split('').reverse().join('').match(/.{1,3}/g).join('.').split('').reverse().join('');
+  el.value=cuerpoFmt+'-'+dv;
 }
 export function g(id){return document.getElementById(id);}
 export function fillSel(id,arr,first){
@@ -150,7 +163,13 @@ export function populateForms(){
   const filTec=g('fil-tec');
   if(filTec){const cur=filTec.value;filTec.innerHTML='<option value="">Todos</option>';tecs.forEach(t=>{const o=document.createElement('option');o.value=t;o.textContent=t;filTec.appendChild(o);});filTec.value=cur;}
   const filMes=g('fil-mes');
-  if(filMes&&filMes.options.length<=1){MESES.forEach(m=>{const o=document.createElement('option');o.value=m;o.textContent=m;filMes.appendChild(o);});}
+  if(filMes&&filMes.options.length<=1){
+    opcionesMesDashboard().forEach(({value,label})=>{const o=document.createElement('option');o.value=value;o.textContent=label;filMes.appendChild(o);});
+    /* Arranca mostrando el mes actual (no todo el histórico) — nada se
+       pierde, "Todos" sigue disponible para revisar meses anteriores. */
+    const hoy=new Date();
+    filMes.value=`${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}`;
+  }
   convertirInputFileConSelector('u-foto-km','Elegir foto');
   convertirInputFileConSelector('u-foto','Elegir foto');
 }

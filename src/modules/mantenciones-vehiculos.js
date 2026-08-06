@@ -1,5 +1,5 @@
 import { MANT_PARAMS, unidades, vehiculoData } from './core-data.js';
-import { calcEstadoReglaFlota } from './estado-flota.js';
+import { calcEstadoReglaFlota, reglaMasReciente } from './estado-flota.js';
 
 /* ===== MANTENCIONES DE VEHÍCULOS ===== */
 export function migrarAceiteRevisionARegla(vd){
@@ -44,15 +44,31 @@ export function kmActualVeh(patente){
 export const CLS_SEMAFORO={verde:'alto',amarillo:'medio',rojo:'bajo'};
 export function estadoAceite(patente){
   const vd=ensureVehData(patente);
-  const r=(vd.reglasMant||[]).find(x=>x.desc==='Cambio de Aceite');
+  const r=reglaMasReciente(vd.reglasMant,'Cambio de Aceite');
   if(!r)return{label:'Sin datos',cls:'sindata'};
   const est=calcEstadoReglaFlota(r,patente);
   return{label:est.vigenteTexto||est.pendiente||'—',cls:CLS_SEMAFORO[est.estado]||'sindata'};
 }
 export function estadoRevision(patente){
   const vd=ensureVehData(patente);
-  const r=(vd.reglasMant||[]).find(x=>x.desc==='Revisión Técnica');
+  const r=reglaMasReciente(vd.reglasMant,'Revisión Técnica');
   if(!r)return{label:'Sin datos',cls:'sindata'};
   const est=calcEstadoReglaFlota(r,patente);
   return{label:est.vigenteTexto||est.pendiente||'—',cls:CLS_SEMAFORO[est.estado]||'sindata'};
+}
+/* Kilometraje más cercano a una fecha dada, para auto-asociar el km al
+   subir un documento de mantención sin tener que escribirlo a mano: primero
+   busca el registro de kilometraje MÁS RECIENTE que sea igual o anterior a
+   esa fecha; si no hay ninguno anterior (ej. se sube un documento de una
+   mantención más vieja que el primer registro de kilometraje), usa el más
+   cercano posterior. Devuelve null si esa patente no tiene ningún registro
+   de kilometraje todavía. */
+export function kmMasCercano(patente,fecha){
+  const regs=unidades.filter(u=>u.patente===patente&&u.kmf&&u.fecha);
+  if(!regs.length||!fecha)return null;
+  const anteriores=regs.filter(u=>u.fecha<=fecha).sort((a,b)=>b.fecha.localeCompare(a.fecha));
+  if(anteriores.length)return anteriores[0].kmf;
+  const posteriores=regs.filter(u=>u.fecha>fecha).sort((a,b)=>a.fecha.localeCompare(b.fecha));
+  if(posteriores.length)return posteriores[0].kmf;
+  return null;
 }

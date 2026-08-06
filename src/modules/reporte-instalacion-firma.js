@@ -3,7 +3,7 @@ import { g } from './form-helpers.js';
 /* ===== Firma táctil (Canvas HTML5, sin librerías externas) ===== */
 export const finstSigCtx={}; /* canvasId -> {ctx, drawing, lastX, lastY} */
 export function finstInitFirmas(){
-  ['finst-firma-cliente','finst-firma-instalador'].forEach(id=>{
+  ['finst-firma-cliente'].forEach(id=>{
     const canvas=g(id);
     if(!canvas||canvas.dataset.sigInit)return;
     canvas.dataset.sigInit='1';

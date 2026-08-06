@@ -4,8 +4,8 @@ import { renderTopFotografiaYResenas } from './exportacion-excel.js';
 import { g } from './form-helpers.js';
 import { ensureVehData, estadoAceite, estadoRevision, kmActualVeh } from './mantenciones-vehiculos.js';
 import { sw } from './nav.js';
-import { renderRegReportes, verDetalleRegistro } from './periodo-helpers.js';
-import { CHART_COLORS, destroyCharts, filtered } from './registro-adjuntos.js';
+import { mesInputARango, renderRegReportes, verDetalleRegistro } from './periodo-helpers.js';
+import { CHART_COLORS, dedupeOtPrimeraVisita, destroyCharts, filtered } from './registro-adjuntos.js';
 import { editarUnidadModal, eliminarUnidad, exportViajePDF, verViajeModal } from './reportes-unidad.js';
 import { exportDashRegistrosPDF, exportDashResumenPDF } from './selector-foto-galeria.js';
 import { uniregSelected } from './unidad-patente-selector.js';
@@ -54,6 +54,39 @@ export function renderDashKpiAcc(kind){
     </div>`).join('')
     +(hayMas?`<div class="dash-kpi-acc-more"><button class="btn-sec btn-sm" onclick="event.stopPropagation();dashKpiVerMas('${kind}')"><i class="ti ti-chevron-down" aria-hidden="true"></i> Ver más antiguas</button></div>`:'');
 }
+/* "Detalle de Mantenciones": a diferencia del resto del Dashboard, esto es una
+   foto del estado de HOY de cada vehículo (aceite, revisión técnica, km), no
+   un histórico — por eso NO se filtra por el mes elegido arriba. En su lugar
+   tiene su propio filtro, independiente, por estado del semáforo. Se calcula
+   aparte y se llama desde renderDash() en las dos ramas (con y sin registros
+   en el mes elegido) para que nunca desaparezca aunque ese mes esté vacío. */
+function renderMantenimientoDashHtml(){
+  const filSem=g('dash-mant-fil-semaforo')?.value||'';
+  const opciones=[['','Todos'],['alto','Vigente'],['medio','Por vencer'],['bajo','Vencido'],['sindata','Sin datos']];
+  const filas=lists.vehiculos.map(p=>({p,eA:estadoAceite(p),eR:estadoRevision(p),kmv:kmActualVeh(p)}))
+    .filter(f=>!filSem||f.eA.cls===filSem||f.eR.cls===filSem);
+  const filasHtml=filas.length?filas.map(({p,eA,eR,kmv})=>`<tr>
+      <td style="font-weight:700">${escapeHtml(p)}</td>
+      <td>${escapeHtml(ensureVehData(p).estado||'Operativo')}</td>
+      <td><span class="eval-avg-badge ${eA.cls}">${eA.label}</span></td>
+      <td><span class="eval-avg-badge ${eR.cls}">${eR.label}</span></td>
+      <td class="num">${kmv!==null?kmv.toLocaleString('es-CL')+' km':'—'}</td>
+    </tr>`).join(''):`<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:1rem">${lists.vehiculos.length?'No hay vehículos con ese estado.':'No hay vehículos cargados en Listas → Vehículos.'}</td></tr>`;
+  return `
+<div class="dash-sec-head" style="--dsc:#6B4AA7">
+  <span class="dash-sec-title">Detalle de Mantenciones</span>
+  <select id="dash-mant-fil-semaforo" onchange="renderDash()" style="font-size:11px;padding:4px 8px;border-radius:6px;border:1px solid var(--border-strong,rgba(11,11,11,.18));background:var(--surface-2,#fff)">
+    ${opciones.map(([v,l])=>`<option value="${v}" ${filSem===v?'selected':''}>${l}</option>`).join('')}
+  </select>
+</div>
+<div class="dash-card-tbl">
+  <table class="dash-tbl">
+    <thead><tr><th>Patente</th><th>Estado</th><th>Cambio de aceite</th><th>Revisión técnica</th><th class="num">KM actual</th></tr></thead>
+    <tbody>${filasHtml}</tbody>
+  </table>
+</div>
+<p class="dash-sec-note">Estado de mantención de cada vehículo AL DÍA DE HOY (no depende del mes elegido arriba): vigencia del cambio de aceite, de la revisión técnica y el kilometraje más reciente registrado en Unidad.</p>`;
+}
 /* Navegación por clic: desde el acordeón del Dashboard salta a Reportes,
    abre el detalle de la OT y hace scroll suave hasta el modal. */
 export function irADetalleDesdeDash(id){
@@ -67,12 +100,13 @@ export function irADetalleDesdeDash(id){
 }
 export function renderDash(){
   const data=filtered();
+  const rangoMes=mesInputARango(g('fil-mes')?.value||'');
   const el=g('dash-body');
   if(data.length===0){
     destroyCharts();
     dashKpiData.garantias=[];
     dashKpiData.conProblema=[];
-    el.innerHTML=`${session?renderTopFotografiaYResenas():''}<div class="empty-s"><i class="ti ti-inbox" aria-hidden="true" style="font-size:28px;display:block;margin-bottom:.5rem;opacity:.4"></i><p style="font-size:13px;font-weight:500">Sin registros</p><p style="font-size:12px">Agrega registros en la pestaña Registro</p></div>`;
+    el.innerHTML=`${session?renderTopFotografiaYResenas(rangoMes):''}<div class="empty-s"><i class="ti ti-inbox" aria-hidden="true" style="font-size:28px;display:block;margin-bottom:.5rem;opacity:.4"></i><p style="font-size:13px;font-weight:500">Sin registros</p><p style="font-size:12px">Agrega registros en la pestaña Registro</p></div>${renderMantenimientoDashHtml()}`;
     return;
   }
   const total=data.length;
@@ -81,7 +115,12 @@ export function renderDash(){
   const gar=garList.length;
   const conProbList=data.filter(r=>r.problema&&!r.problema.toUpperCase().includes('NINGUNO'));
   const conProb=conProbList.length;
-  const conGoogle=data.filter(r=>evalFotosOT[r.ot]&&evalFotosOT[r.ot].googleReview).length;
+  /* dedupeOtPrimeraVisita: la reseña de Google es un dato de la OT completa,
+     no de cada visita suelta — se cuenta una sola vez por OT para no inflar
+     ni la conversión total ni el gráfico por técnico si la OT tiene más de
+     una fila (garantía posterior, o un guardado duplicado). */
+  const dataGoogleUnica=dedupeOtPrimeraVisita(data);
+  const conGoogle=dataGoogleUnica.filter(r=>evalFotosOT[r.ot]&&evalFotosOT[r.ot].googleReview).length;
   const totalCort=data.reduce((s,r)=>s+(r.cantidad||0),0);
   const conTraslado=data.filter(r=>r.traslado&&r.traslado.toUpperCase()!=='NO APLICA'&&r.traslado!=='').length;
   const duraciones=data.filter(r=>r.durMin>0).map(r=>r.durMin);
@@ -98,7 +137,7 @@ export function renderDash(){
   data.forEach(r=>{[r.tec1,r.tec2,r.tec3,r.tec4].filter(Boolean).forEach(t=>{tecMap[t]=(tecMap[t]||0)+1;});});
 
   const googleTecMap={};
-  data.filter(r=>evalFotosOT[r.ot]&&evalFotosOT[r.ot].googleReview).forEach(r=>{[r.tec1,r.tec2,r.tec3,r.tec4].filter(Boolean).forEach(t=>{googleTecMap[t]=(googleTecMap[t]||0)+1;});});
+  dataGoogleUnica.filter(r=>evalFotosOT[r.ot]&&evalFotosOT[r.ot].googleReview).forEach(r=>{[r.tec1,r.tec2,r.tec3,r.tec4].filter(Boolean).forEach(t=>{googleTecMap[t]=(googleTecMap[t]||0)+1;});});
   const gtLabels=Object.keys(googleTecMap);
   const gtVals=gtLabels.map(k=>googleTecMap[k]);
 
@@ -150,7 +189,7 @@ export function renderDash(){
 </div>
 <p class="dash-sec-note">De izquierda a derecha: cuántas visitas hay por mes, cuánta carga de trabajo tiene cada técnico, cuántas reseñas de Google consigue cada uno, qué tipos de problemas se repiten más, y qué tan difíciles fueron las instalaciones.</p>
 
-${isAdminUser()?renderTopFotografiaYResenas():''}
+${isAdminUser()?renderTopFotografiaYResenas(rangoMes):''}
 
 <div class="dash-sec-head" style="--dsc:#eda100">
   <span class="dash-sec-title">Registros</span>
@@ -179,27 +218,7 @@ ${isAdminUser()?renderTopFotografiaYResenas():''}
   <p class="dash-sec-note" style="padding:.9rem 1rem 1rem;margin:0">Últimas visitas registradas (hasta 60), ordenadas de la más reciente a la más antigua, con su tipo, técnico, duración y estado.</p>
 </div>
 
-<div class="dash-sec-head" style="--dsc:#6B4AA7">
-  <span class="dash-sec-title">Detalle de Mantenciones</span>
-</div>
-<div class="dash-card-tbl">
-  <table class="dash-tbl">
-    <thead><tr><th>Patente</th><th>Estado</th><th>Cambio de aceite</th><th>Revisión técnica</th><th class="num">KM actual</th></tr></thead>
-    <tbody>
-      ${lists.vehiculos.length?lists.vehiculos.map(p=>{
-        const eA=estadoAceite(p),eR=estadoRevision(p),kmv=kmActualVeh(p);
-        return `<tr>
-          <td style="font-weight:700">${escapeHtml(p)}</td>
-          <td>${escapeHtml(ensureVehData(p).estado||'Operativo')}</td>
-          <td><span class="eval-avg-badge ${eA.cls}">${eA.label}</span></td>
-          <td><span class="eval-avg-badge ${eR.cls}">${eR.label}</span></td>
-          <td class="num">${kmv!==null?kmv.toLocaleString('es-CL')+' km':'—'}</td>
-        </tr>`;
-      }).join(''):'<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:1rem">No hay vehículos cargados en Listas → Vehículos.</td></tr>'}
-    </tbody>
-  </table>
-</div>
-<p class="dash-sec-note">Estado de mantención de cada vehículo: vigencia del cambio de aceite, de la revisión técnica y el kilometraje más reciente registrado en Unidad.</p>`;
+${renderMantenimientoDashHtml()}`;
 
   destroyCharts();
   const co={responsive:true,maintainAspectRatio:false};
@@ -225,14 +244,26 @@ ${isAdminUser()?renderTopFotografiaYResenas():''}
 export function renderUniTable(){
   const wrap=g('uni-table');
   if(!wrap)return;
+  /* Filtro de mes: por defecto solo se muestra el mes actual (el historial
+     de kilometraje crece todos los días), pero nada se borra — elegir
+     "Todos los meses" muestra siempre el histórico completo de la patente. */
+  const filMesEl=g('uni-fil-mes');
+  if(filMesEl&&!filMesEl.dataset.filled){
+    filMesEl.innerHTML='<option value="">Todos los meses</option>'+MESES.map(m=>`<option value="${m}">${m}</option>`).join('');
+    filMesEl.dataset.filled='1';
+    filMesEl.value=MESES[new Date().getMonth()];
+  }
+  const mesSel=filMesEl?filMesEl.value:'';
   if(!uniregSelected){
     g('uni-count').textContent='0 registros';
     wrap.innerHTML=`<div class="empty-s" style="padding:1.5rem"><p style="font-size:12px">Selecciona una patente arriba para ver su historial.</p></div>`;
     return;
   }
-  const trips=unidades.filter(u=>u.patente===uniregSelected).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')||(b.id||0)-(a.id||0));
+  let trips=unidades.filter(u=>u.patente===uniregSelected);
+  if(mesSel)trips=trips.filter(u=>u.mes===mesSel);
+  trips=trips.sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')||(b.id||0)-(a.id||0));
   g('uni-count').textContent=`${trips.length} registro${trips.length===1?'':'s'} · ${uniregSelected}`;
-  if(!trips.length){wrap.innerHTML=`<div class="empty-s" style="padding:1.5rem"><p style="font-size:12px">Sin registros de kilometraje para ${escapeHtml(uniregSelected)}.</p></div>`;return;}
+  if(!trips.length){wrap.innerHTML=`<div class="empty-s" style="padding:1.5rem"><p style="font-size:12px">Sin registros de kilometraje para ${escapeHtml(uniregSelected)}${mesSel?' en '+mesSel.charAt(0)+mesSel.slice(1).toLowerCase():''}.</p></div>`;return;}
   wrap.innerHTML=`<div class="card" style="padding:0;overflow:hidden;margin-bottom:0">`+trips.map(u=>`
     <div class="reg-row">
       <div class="reg-row-info">

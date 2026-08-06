@@ -84,3 +84,33 @@ export function fotografosValidos(){
   const tecsActuales=tecnicosDeLaOTActual();
   return fotografos.filter(f=>tecsActuales.includes(f));
 }
+
+/* ---------- Integrantes de la camioneta (Unidad → Registro de kilometraje):
+   a diferencia de los fotógrafos (que se eligen entre los técnicos YA
+   ingresados en esa visita), acá se elige libremente de entre TODOS los
+   técnicos, porque este formulario no tiene un tec1..tec4 propio. */
+export let uniIntegrantes=[];
+export function __set_uniIntegrantes(v){ uniIntegrantes = v; }
+export function renderUniIntegrantesRows(){
+  const cont=g('uni-integrantes-rows');
+  if(!cont)return;
+  const tecs=tecnicosList();
+  if(!tecs.length){
+    cont.innerHTML='<p class="eval-empty" style="margin:0">No hay técnicos cargados en Listas → Personas.</p>';
+    return;
+  }
+  cont.innerHTML=`<div class="fotografo-chips">`+tecs.map(t=>{
+    const sel=uniIntegrantes.includes(t);
+    return `<span class="fotografo-chip ${sel?'sel':''}" onclick="toggleUniIntegrante('${escapeHtml(t).replace(/'/g,"\\'")}')">${escapeHtml(t)}</span>`;
+  }).join('')+`</div>`;
+}
+export function toggleUniIntegrante(nombre){
+  const idx=uniIntegrantes.indexOf(nombre);
+  if(idx>=0)uniIntegrantes.splice(idx,1);else uniIntegrantes.push(nombre);
+  renderUniIntegrantesRows();
+}
+export function resetUniIntegrantes(){__set_uniIntegrantes([]);renderUniIntegrantesRows();}
+export function uniIntegrantesValidos(){
+  const tecsActuales=tecnicosList();
+  return uniIntegrantes.filter(n=>tecsActuales.includes(n));
+}

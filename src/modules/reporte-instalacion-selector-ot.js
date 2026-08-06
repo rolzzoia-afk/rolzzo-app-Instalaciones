@@ -5,11 +5,25 @@ import { sw } from './nav.js';
 import { FINST_PRODUCTOS, __set_finstChecklist, __set_finstEncuesta, __set_finstProductos, finstRenderChecklist, finstRenderEncuesta, finstRenderProductos } from './reporte-instalacion-catalogos.js';
 import { finstInitFirmas, finstLimpiarFirma } from './reporte-instalacion-firma.js';
 
+/* Registro (OT) que quedó vinculado tras una búsqueda exitosa — se usa para
+   sacar la dirección de instalación (calle/número/comuna/región) al
+   generar el certificado, sin tener que pedirla de nuevo en este
+   formulario. null si no se ha buscado nada o no se encontró la OT. */
+let finstRegistroActual=null;
+export function finstRegistroEncontrado(){ return finstRegistroActual; }
+
+/* En el certificado el instalador debe verse solo por su nombre de pila
+   (sin apellidos), aunque en el registro esté guardado como nombre completo. */
+function soloPrimerNombre(nombreCompleto){
+  return (nombreCompleto||'').trim().split(/\s+/)[0]||'';
+}
+
 /* ===== Selector de OT: recicla los datos que ya existen en el registro ===== */
 export function finstBuscarOT(){
   const val=(g('finst-ot-input').value||'').trim();
   if(!val){alert('Ingresa un número de OT para buscar.');return;}
   const reg=registros.find(r=>(r.ot||'').toLowerCase()===val.toLowerCase());
+  finstRegistroActual=reg||null;
   const found=g('finst-ot-found');
   if(!reg){
     found.style.display='flex';
@@ -19,7 +33,7 @@ export function finstBuscarOT(){
     g('finst-ot').value=val;
     return;
   }
-  const tecs=[reg.tec1,reg.tec2,reg.tec3,reg.tec4].filter(Boolean).join(', ');
+  const tecs=[reg.tec1,reg.tec2,reg.tec3,reg.tec4].filter(Boolean).map(soloPrimerNombre).join(', ');
   g('finst-nombre').value=reg.cliente||'';
   g('finst-ot').value=reg.ot||'';
   g('finst-fecha').value=reg.fecha||'';
@@ -44,12 +58,13 @@ export function finstBuscarOT(){
 export function finstNuevoDesdeCero(){
   g('finst-ot-input').value='';
   g('finst-ot-found').style.display='none';
+  finstRegistroActual=null;
   finstBlankForm();
 }
 /* Deja el formulario completo en blanco (usado al entrar por primera vez
    a la pestaña y al presionar "En blanco"). */
 export function finstBlankForm(){
-  ['finst-nombre','finst-ot','finst-telefono','finst-fecha','finst-email','finst-instalador',
+  ['finst-nombre','finst-ot','finst-telefono','finst-fecha','finst-email','finst-instalador','finst-rut-cliente',
    'finst-material','finst-observacion','finst-mejorarias','finst-comentario-encuesta',
    'finst-llegada','finst-salida','finst-encargado','finst-fecha-conforme'].forEach(id=>{const el=g(id);if(el)el.value='';});
   ['finst-fotos','finst-rrss','finst-rodapie','finst-guardapolvo'].forEach(id=>{const el=g(id);if(el)el.checked=false;});
@@ -58,7 +73,7 @@ export function finstBlankForm(){
   document.querySelectorAll('#rg-finst-cortar .ro').forEach(x=>x.classList.toggle('sel',x.getAttribute('onclick').includes("'No'")));
   __set_finstProductos([]);__set_finstChecklist({});__set_finstEncuesta({});
   finstRenderProductos();finstRenderChecklist();finstRenderEncuesta();
-  finstLimpiarFirma('finst-firma-cliente');finstLimpiarFirma('finst-firma-instalador');
+  finstLimpiarFirma('finst-firma-cliente');
   g('finst-post-pdf').style.display='none';
 }
 /* Se llama al entrar a la pestaña "Formulario" (ver sw()): inicializa las

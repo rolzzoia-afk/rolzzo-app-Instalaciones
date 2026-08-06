@@ -1,6 +1,6 @@
-import { sb } from './bootstrap.js';
+import { loadPersonas, validarPinServidor } from './bootstrap.js';
 import { renderColorPopover } from './color-sistema.js';
-import { __set_editMode, __set_session, editMode, personas, session } from './core-data.js';
+import { __set_editMode, __set_session, editMode, session } from './core-data.js';
 import { g } from './form-helpers.js';
 import { buildNav, firstAccessibleTab, sw } from './nav.js';
 import { restoreRegDraft } from './registro-adjuntos.js';
@@ -18,15 +18,34 @@ pinInputs.forEach((inp,idx)=>{
     if(e.key==='Backspace'&&!inp.value&&idx>0)pinInputs[idx-1].focus();
   });
 });
-export function checkPin(){
+/* checkPin ya NO compara el código contra una copia local de personas: lo
+   valida contra la Edge Function "validar-pin" (usa service_role del lado
+   servidor). Así, el PIN de todo el personal nunca se descarga al navegador
+   antes de un login exitoso. */
+let pinChecking=false;
+export async function checkPin(){
   const code=pinInputs.map(i=>i.value).join('');
   const prev=document.getElementById('pin-preview');
   if(code.length<4){prev.textContent='\u00a0';prev.className='pin-preview';return;}
-  const p=personas.find(p=>p.codigo===code);
-  if(p){
+  if(pinChecking)return;
+  pinChecking=true;
+  const r=await validarPinServidor(code);
+  pinChecking=false;
+  if(r.ok){
+    const p=r.persona;
     prev.textContent=`${p.nombre} · ${p.rol==='admin'?'Administrador':'Operario'}`;
     prev.className='pin-preview ok';
-    doLogin(p);
+    await doLogin(p);
+  }else if(r.network){
+    prev.textContent='No se pudo verificar el código. Revisa tu conexión e intenta de nuevo.';
+    prev.className='pin-preview bad';
+    pinInputs.forEach(i=>i.classList.add('err'));
+    setTimeout(()=>{
+      pinInputs.forEach(i=>{i.value='';i.classList.remove('err');});
+      prev.textContent=' ';
+      prev.className='pin-preview';
+      pinInputs[0].focus();
+    },450);
   }else{
     prev.textContent='Código no reconocido, intenta de nuevo';
     prev.className='pin-preview bad';
@@ -47,17 +66,20 @@ export function tocarActividadSesion(){
   if(!session)return;
   try{localStorage.setItem('rolzzo_session_actividad',String(Date.now()));}catch(e){}
 }
-export function doLogin(p){
+export async function doLogin(p){
   __set_session({nombre:p.nombre,codigo:p.codigo,rol:p.rol});
   try{
     localStorage.setItem('rolzzo_session',JSON.stringify(session));
     localStorage.setItem('rolzzo_session_actividad',String(Date.now()));
   }catch(e){}
+  await loadPersonas();
   document.getElementById('login-screen').style.display='none';
   document.getElementById('shell').style.display='flex';
   document.getElementById('sb-avatar').textContent=p.nombre.split(' ').map(w=>w[0]).slice(0,2).join('');
   document.getElementById('sb-user-name').textContent=p.nombre;
   document.getElementById('sb-user-role').textContent=p.rol==='admin'?'Administrador':'Operario';
+  document.getElementById('topbar-user-name').textContent=p.nombre;
+  document.getElementById('topbar-user-role').textContent=p.rol==='admin'?'Administrador':'Operario';
   document.getElementById('edit-toggle-btn').style.display='flex';
   document.getElementById('color-toggle-btn').style.display='flex';
   renderColorPopover();
@@ -69,7 +91,7 @@ export function doLogin(p){
    de la pestaña). Si la persona ya no existe en el sistema (fue eliminada),
    o si estuvo inactiva por más de SESION_INACTIVIDAD_MIN minutos, se ignora
    la sesión guardada y se pide iniciar sesión de nuevo. */
-export function tryRestoreSession(){
+export async function tryRestoreSession(){
   let saved=null;
   try{saved=JSON.parse(localStorage.getItem('rolzzo_session')||'null');}catch(e){}
   if(!saved||!saved.codigo)return false;
@@ -83,15 +105,21 @@ export function tryRestoreSession(){
     }catch(e){}
     return false;
   }
-  const p=personas.find(x=>x.codigo===saved.codigo);
-  if(!p){
-    try{
-      localStorage.removeItem('rolzzo_session');
-      localStorage.removeItem('rolzzo_session_actividad');
-    }catch(e){}
+  const r=await validarPinServidor(saved.codigo);
+  if(!r.ok){
+    // Si fue un problema de red (Edge Function/Supabase no disponible), no
+    // borramos la sesión guardada: se reintenta la próxima vez que se abra
+    // la app. Si el código genuinamente ya no existe (persona eliminada o
+    // código cambiado por un admin), ahí sí se limpia y se pide PIN de nuevo.
+    if(!r.network){
+      try{
+        localStorage.removeItem('rolzzo_session');
+        localStorage.removeItem('rolzzo_session_actividad');
+      }catch(e){}
+    }
     return false;
   }
-  doLogin(p);
+  await doLogin(r.persona);
   return true;
 }
 export function logout(){

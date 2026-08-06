@@ -21,7 +21,7 @@ export function exportViajesExcel(patente){
   list.sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''));
   if(!list.length){alert('No hay viajes para exportar.');return;}
   const rows=list.map(u=>({
-    'MES':u.mes||'','FECHA':u.fecha||'','CONDUCTOR':u.conductor||'','KM INICIAL':u.kmi??'','KM FINAL':u.kmf??'','TOTAL':u.total??'','PATENTE':u.patente||'','COMBUSTIBLE':u.comb||'','RECARGA':u.recarga||'','MONTO':u.monto??'','FORMA DE PAGO':u.pago||'','INTEGRANTE 1':u.i1||'','INTEGRANTE 2':u.i2||'','INTEGRANTE 3':u.i3||'','INTEGRANTE 4':u.i4||''
+    'MES':u.mes||'','FECHA':u.fecha||'','CONDUCTOR':u.conductor||'','KM INICIAL':u.kmi??'','KM FINAL':u.kmf??'','TOTAL':u.total??'','PATENTE':u.patente||'','COMBUSTIBLE':u.comb||'','RECARGA':u.recarga||'','MONTO':u.monto??'','FORMA DE PAGO':u.pago||'','INTEGRANTES':(u.integrantes&&u.integrantes.length)?u.integrantes.join(', '):([u.i1,u.i2,u.i3,u.i4].filter(Boolean).join(', '))
   }));
   xlsxDownload(rows,'Viajes',`Viajes_${patente?safeId(patente):'todos'}.xlsx`);
 }
@@ -31,7 +31,7 @@ export function exportRegistrosExcel(){
   const list=registros.slice().sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''));
   if(!list.length){alert('No hay registros para exportar.');return;}
   const rows=list.map(r=>({
-    'FECHA INSTALACION':r.fecha||'','MES':r.mes||'','TIPO':r.tipo||'','TÉCNICO':[r.tec1,r.tec2,r.tec3,r.tec4].filter(Boolean).join(', '),'NOMBRE CLIENTE':r.cliente||'','# OT':r.ot||'','HORA DE INICIO':r.hinicio||'','CANTIDAD DE CORTINAS':r.cantidad??'','TIPO DE CORTINA':r.tipoCortina||'','ADICIONAL':r.adicional||'','CANTIDAD ADICIONAL':(r.extras&&r.extras.length)?r.extras.map(e=>e.cantidad||0).join(', '):'','TIPO DE GARANTIA':r.tipoGar||'','NIVEL/DIFICULTAD':nivelDifLabel(r.nivelDif),'MATERIAL DE DONDE SE INSTALA':(r.materiales&&r.materiales.length)?r.materiales.join(', '):(r.material||''),'ANCLAJE':anclajeLabel(r.anclaje),'HORA DE SALIDA':r.hsalida||'','TIEMPO DE INSTALACION':fmtDurMin(r.durMin),'GOOGLE⭐⭐⭐⭐⭐':r.google||'','VIDEO':r.video||'','DAÑOS':r.danos||'','TIPO DE PROBLEMA EN LA INSTALACION':r.problema||'','SOLUCION':r.solucion||'','¿QUÉ PROBLEMA SE TUVO QUE SOLUCIONAR?':r.queSol||'','¿VENDEDOR?':'','TIEMPO DE TRASLADO IDA Y VUELTA':r.traslado||'','CODIGO DE BARRA MOTOR DE REGALO':r.codMotor||'','UBICACIÓN DE INSTALACIÓN':r.ubicacion||'','¿QUIÉNES SACARON LAS FOTOS?':(r.fotografos&&r.fotografos.length)?r.fotografos.join(', '):'','GIFTCARD':r.giftcard==='Si'?'Sí':'No','CÓDIGO GIFTCARD':r.giftcardCodigo||'','% DESCUENTO GIFTCARD':(r.giftcardDescuento||r.giftcardDescuento===0)?r.giftcardDescuento:'','COMENTARIO ADICIONAL':r.comentario||'','CREADO POR':r.creadoPor||''
+    'FECHA INSTALACION':r.fecha||'','MES':r.mes||'','TIPO':r.tipo||'','TÉCNICO':[r.tec1,r.tec2,r.tec3,r.tec4].filter(Boolean).join(', '),'NOMBRE CLIENTE':r.cliente||'','# OT':r.ot||'','HORA DE INICIO':r.hinicio||'','CANTIDAD DE CORTINAS':r.cantidad??'','TIPO DE CORTINA':r.tipoCortina||'','ADICIONAL':r.adicional||'','CANTIDAD ADICIONAL':(r.extras&&r.extras.length)?r.extras.map(e=>e.cantidad||0).join(', '):'','TIPO DE GARANTIA':r.tipoGar||'','NIVEL/DIFICULTAD':nivelDifLabel(r.nivelDif),'MATERIAL DE DONDE SE INSTALA':(r.materiales&&r.materiales.length)?r.materiales.join(', '):(r.material||''),'ANCLAJE':anclajeLabel(r.anclaje),'HORA DE SALIDA':r.hsalida||'','TIEMPO DE INSTALACION':fmtDurMin(r.durMin),'GOOGLE⭐⭐⭐⭐⭐':r.google||'','VIDEO':r.video||'','FOTO Y VIDEO':r.fotoVideo||'','DAÑOS':r.danos||'','TIPO DE PROBLEMA EN LA INSTALACION':r.problema||'','SOLUCION':r.solucion||'','¿QUÉ PROBLEMA SE TUVO QUE SOLUCIONAR?':r.queSol||'','¿VENDEDOR?':'','TIEMPO DE TRASLADO IDA Y VUELTA':r.traslado||'','CODIGO DE BARRA MOTOR DE REGALO':r.codMotor||'','UBICACIÓN DE INSTALACIÓN':r.ubicacion||'','¿QUIÉNES SACARON LAS FOTOS?':(r.fotografos&&r.fotografos.length)?r.fotografos.join(', '):'','GIFTCARD':r.giftcard==='Si'?'Sí':'No','CÓDIGO GIFTCARD':r.giftcardCodigo||'','% DESCUENTO GIFTCARD':(r.giftcardDescuento||r.giftcardDescuento===0)?r.giftcardDescuento:'','COMENTARIO ADICIONAL':r.comentario||'','CREADO POR':r.creadoPor||''
   }));
   xlsxDownload(rows,'Registros','Instalaciones_y_Garantias.xlsx');
 }
@@ -87,6 +87,9 @@ export function renderSegReportes(){
   if(selMes&&!selMes.dataset.filled){
     selMes.innerHTML='<option value="">Todos los meses</option>'+MESES.map(m=>`<option value="${m}">${m}</option>`).join('');
     selMes.dataset.filled='1';
+    /* Arranca mostrando el mes actual (no todo el histórico) — nada se
+       pierde, "Todos los meses" sigue disponible para el histórico. */
+    selMes.value=MESES[new Date().getMonth()];
   }
   const hintEl=g('segrep-hint');
   if(hintEl)hintEl.textContent=isAdminUser()
@@ -272,21 +275,42 @@ export function exportMantencionesExcel(){
   if(!rows.length)rows.push({'MES':'','AÑO':'','FECHA':'','PATENTE':'','CODIGO':'','TIPO':'','DESCRIPCION':'','CANTIDAD POR FURGON':'','¿SE UTILIZA REPUESTO?':'','CANTIDAD UTILIZADA':'','RESTA':'','OT':'','COMENTARIO':'','CREADO POR':''});
   xlsxDownload(rows,'Mantenciones','Mantenciones_Repuestos.xlsx');
 }
-/* Ranking ejecutivo: mejores notas promedio de calidad de fotos (histórico, todo el equipo) */
-export function rankingTopFotografia(){
+/* OT → fecha de su visita más antigua, para poder ubicar en el tiempo datos
+   (como evaluacionesFotos) que están indexados por OT y no traen fecha propia. */
+function otFechaPrimeraVisita(){
+  const mapa={};
+  registros.forEach(r=>{
+    if(!r.ot)return;
+    const prev=mapa[r.ot];
+    if(!prev||(r.id||0)<(prev.id||0))mapa[r.ot]=r;
+  });
+  const fechas={};
+  Object.keys(mapa).forEach(ot=>{fechas[ot]=mapa[ot].fecha||'';});
+  return fechas;
+}
+function fechaEnRango(fecha,rango){
+  if(!rango||!rango.desde)return true;
+  return!!fecha&&fecha>=rango.desde&&fecha<=rango.hasta;
+}
+/* Ranking ejecutivo: mejores notas promedio de calidad de fotos. Sin `rango`
+   es histórico (todo el equipo, todo el tiempo); con `rango` ({desde,hasta})
+   solo cuenta evaluaciones de OTs cuya visita cayó dentro de ese rango. */
+export function rankingTopFotografia(rango){
+  const otFecha=rango?otFechaPrimeraVisita():null;
   const porTecnico={};
-  evaluacionesFotos.filter(e=>e.nivel&&evalFotosOT[e.ot]?.clasificacionContenido==='redes').forEach(e=>{
+  evaluacionesFotos.filter(e=>e.nivel&&evalFotosOT[e.ot]?.clasificacionContenido==='redes'&&(!rango||fechaEnRango(otFecha[e.ot],rango))).forEach(e=>{
     if(!porTecnico[e.persona])porTecnico[e.persona]={sum:0,n:0};
     porTecnico[e.persona].sum+=e.nivel;porTecnico[e.persona].n++;
   });
   return Object.keys(porTecnico).map(nombre=>({nombre,avg:porTecnico[nombre].sum/porTecnico[nombre].n,n:porTecnico[nombre].n}))
     .filter(r=>r.n>0).sort((a,b)=>b.avg-a.avg||b.n-a.n);
 }
-/* Ranking ejecutivo: operadores que más reseñas de Google han cerrado con éxito, con tasa de éxito (histórico).
+/* Ranking ejecutivo: operadores que más reseñas de Google han cerrado con éxito, con tasa de éxito.
    Cuenta reseñas CONFIRMADAS en el seguimiento (evalFotosOT[ot].googleReview===true, alguien pegó el
    comentario real que dejó el cliente), no lo que el técnico marcó al vuelo al generar la OT — ese
-   dato es solo una expectativa, no una reseña verificada. */
-export function rankingTopCierreResenas(){
+   dato es solo una expectativa, no una reseña verificada. Sin `rango` es histórico; con `rango`
+   ({desde,hasta}) solo cuenta OTs cuya visita representativa cayó dentro de ese rango. */
+export function rankingTopCierreResenas(rango){
   const byOt={};
   registros.forEach(r=>{
     if(!r.ot)return;
@@ -294,7 +318,7 @@ export function rankingTopCierreResenas(){
     if(!prev||(r.id||0)>(prev.id||0))byOt[r.ot]=r;
   });
   const porTecnico={};
-  Object.values(byOt).forEach(r=>{
+  Object.values(byOt).filter(r=>fechaEnRango(r.fecha,rango)).forEach(r=>{
     [r.tec1,r.tec2,r.tec3,r.tec4].filter(Boolean).forEach(t=>{
       if(!porTecnico[t])porTecnico[t]={conResena:0,total:0};
       porTecnico[t].total++;
@@ -308,8 +332,8 @@ export function rankingTopCierreResenas(){
 }
 export function tasaBadgeCls(tasa){return tasa>=70?'b-ok':(tasa>=40?'b-inst':'b-err');}
 /* Tabla ejecutiva: Top Instaladores por nota fotográfica (usada en Dashboard y en Reportes) */
-export function tablaTopFotografiaHtml(limite){
-  let rows=rankingTopFotografia();
+export function tablaTopFotografiaHtml(limite,rango){
+  let rows=rankingTopFotografia(rango);
   if(limite)rows=rows.slice(0,limite);
   if(!rows.length)return'<p class="eval-empty" style="text-align:center;margin:0">Aún no hay evaluaciones de fotos registradas.</p>';
   return `<div class="tbl-wrap"><table class="tbl">
@@ -323,8 +347,8 @@ export function tablaTopFotografiaHtml(limite){
   </table></div>`;
 }
 /* Tabla ejecutiva: Top Cierre de Reseñas Google, con tasa de éxito (usada en Dashboard y en Reportes) */
-export function tablaTopResenasHtml(limite){
-  let rows=rankingTopCierreResenas();
+export function tablaTopResenasHtml(limite,rango){
+  let rows=rankingTopCierreResenas(rango);
   if(limite)rows=rows.slice(0,limite);
   if(!rows.length)return'<p class="eval-empty" style="text-align:center;margin:0">Aún no hay OTs registradas.</p>';
   return `<div class="tbl-wrap"><table class="tbl">
@@ -338,9 +362,9 @@ export function tablaTopResenasHtml(limite){
     </tr>`).join('')}</tbody>
   </table></div>`;
 }
-export function renderTopFotografiaYResenas(){
-  const fotoRows=rankingTopFotografia();
-  const resenaRows=rankingTopCierreResenas();
+export function renderTopFotografiaYResenas(rango){
+  const fotoRows=rankingTopFotografia(rango);
+  const resenaRows=rankingTopCierreResenas(rango);
   if(!fotoRows.length&&!resenaRows.length)return'';
   return `
 <div class="dash-sec-head" style="--dsc:#4F46E5">
@@ -349,11 +373,11 @@ export function renderTopFotografiaYResenas(){
 <div class="cg2" style="margin-bottom:1rem">
   <div class="ch-card" style="padding:0;overflow:hidden">
     <p class="ch-lbl" style="padding:.9rem 1.1rem 0"><i class="ti ti-camera" aria-hidden="true" style="color:#4F46E5;margin-right:4px"></i>Top Fotografía · mejor nota promedio</p>
-    <div style="padding:.6rem 1.1rem 1rem">${tablaTopFotografiaHtml(5)}</div>
+    <div style="padding:.6rem 1.1rem 1rem">${tablaTopFotografiaHtml(5,rango)}</div>
   </div>
   <div class="ch-card" style="padding:0;overflow:hidden">
     <p class="ch-lbl" style="padding:.9rem 1.1rem 0"><i class="ti ti-message-star" aria-hidden="true" style="color:#E65100;margin-right:4px"></i>Top Cierre de Reseñas · Google</p>
-    <div style="padding:.6rem 1.1rem 1rem">${tablaTopResenasHtml(5)}</div>
+    <div style="padding:.6rem 1.1rem 1rem">${tablaTopResenasHtml(5,rango)}</div>
   </div>
 </div>`;
 }

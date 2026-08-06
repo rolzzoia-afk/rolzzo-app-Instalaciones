@@ -622,7 +622,12 @@ export function renderPersonaEvalCard(p,mes,fecha,kindOpen){
 }
 export function renderEvalNuevo(){
   const filMesEl=g('en-fil-mes');
-  if(filMesEl&&filMesEl.options.length===0)filMesEl.innerHTML='<option value="">Todos los meses</option>'+MESES.map(m=>`<option value="${m}">${m}</option>`).join('');
+  if(filMesEl&&filMesEl.options.length===0){
+    filMesEl.innerHTML='<option value="">Todos los meses</option>'+MESES.map(m=>`<option value="${m}">${m}</option>`).join('');
+    /* Arranca mostrando el mes actual (no todo el histórico) — nada se
+       pierde, "Todos los meses" sigue disponible para el histórico. */
+    filMesEl.value=MESES[new Date().getMonth()];
+  }
   const filPerEl=g('en-fil-persona');
   const list=nuevoPersonaList();
   if(filPerEl){const cur=filPerEl.value;filPerEl.innerHTML='<option value="">Todas</option>'+list.map(p=>`<option value="${p.nombre}">${p.nombre}</option>`).join('');filPerEl.value=cur;}

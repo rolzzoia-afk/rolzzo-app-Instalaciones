@@ -1,8 +1,8 @@
-import { __set_ingresoMantNombre, adjPendientes, descargarDocumentoVehiculo, exportVehiculoPDF, limpiarAdjPendientes, removeItemExtra, renderBarraAdjuntos, renderMantDetail, subirArchivosACola } from './adjuntos-pendientes.js';
+import { adjPendientes, descargarDocumentoVehiculo, exportVehiculoPDF, limpiarAdjPendientes, removeItemExtra, renderBarraAdjuntos, renderMantDetail, subirArchivosACola } from './adjuntos-pendientes.js';
 import { dbDeleteDocumentoVehiculo, dbDeleteUnidad, dbUpsertUnidad, dbUpsertVehiculo, saveAll, sb, sbReady } from './bootstrap.js';
-import { __set_mantSelected, __set_unidades, activarInputsFilesrc, lists, session, unidades } from './core-data.js';
+import { MESES, __set_mantSelected, __set_unidades, activarInputsFilesrc, lists, session, unidades } from './core-data.js';
 import { renderUniTable } from './dashboard-kpis.js';
-import { __set_flotaSelected, calcEstadoReglaFlota, renderEstadoFlota } from './estado-flota.js';
+import { __set_flotaSelected, calcEstadoReglaFlota, reglaMasReciente, renderEstadoFlota } from './estado-flota.js';
 import { escapeHtml, formatFecha, formatFechaHora, isAdminUser, mesFromFecha, safeId } from './evaluaciones.js';
 import { pdfCheckPageBreak, pdfDrawHeader, pdfDrawTitleBlock, pdfSectionBar } from './evaluaciones-pdf.js';
 import { exportViajesExcel } from './exportacion-excel.js';
@@ -11,7 +11,7 @@ import { fillSel, g, populateForms, tecnicosList } from './form-helpers.js';
 import { renderAdmin } from './listas-admin.js';
 import { ensureVehData } from './mantenciones-vehiculos.js';
 import { sw } from './nav.js';
-import { forzarDescarga, guardar, mostrarAvisoGuardadoOk, tiposRegistroKm } from './registro-adjuntos.js';
+import { forzarDescarga, guardar, mostrarAvisoGuardadoOk } from './registro-adjuntos.js';
 import { comprimirImagenSiHaceFalta, pdfAddPhotosPage } from './selector-foto-galeria.js';
 import { __set_uniregSelected, renderUniregChips } from './unidad-patente-selector.js';
 
@@ -57,25 +57,6 @@ export async function addPatenteQuick(ctx){
   if(ctx==='flota'){__set_flotaSelected(val);renderEstadoFlota();}
 }
 export function setRepSubTab(t){repSubTab=t;renderRepDetail();}
-/* Igual que "+ Agregar patente": agrega un nuevo nombre de mantención
-   directamente desde la pantalla de Mantenciones, sin sacar al usuario a
-   la sección Listas. */
-export async function addMantNombreQuick(){
-  const val=(prompt('Ingresa el nombre de la nueva mantención (ej: Cambio de neumáticos):')||'').trim();
-  if(!val)return;
-  if(!lists.mantNombres)lists.mantNombres=[];
-  if(lists.mantNombres.includes(val)){alert('Ese nombre de mantención ya existe.');return;}
-  lists.mantNombres.push(val);
-  const ok=await saveAll();
-  if(!ok){
-    lists.mantNombres=lists.mantNombres.filter(v=>v!==val);
-    return;
-  }
-  populateForms();
-  __set_ingresoMantNombre(val);
-  renderMantenciones();
-  if(typeof renderAdmin==='function')renderAdmin();
-}
 /* Arma una lista unificada de "eventos" de mantención para una patente: el cambio
    de aceite, la revisión técnica, cada mantención adicional y cada documento cargado,
    cada uno con su fecha, tipo, detalle y fotos/archivos adjuntos si los tiene. */
@@ -132,18 +113,80 @@ export function buildMantEventos(patente){
   return eventos.sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
 }
 export let mantEventosActual=[];
+/* Historial dentro de la propia pantalla de Mantenciones (no solo en
+   Reportes): mismo criterio de "arranca en el mes actual" que el resto de
+   la app. Comparte mantEventosActual/verDetalleMantencion/eliminarEventoMantencion
+   con repMantResumenHTML — como los dos historiales nunca se ven ni se
+   interactúan al mismo tiempo (son pestañas distintas), reusar ese estado es
+   seguro y evita duplicar la lógica del modal de detalle.
+   null = todavía no se tocó el filtro (arranca en el mes actual); '' = el
+   usuario eligió explícitamente "Todos los meses". No se inicializa con
+   MESES[...] directamente porque este módulo se carga en un ciclo de
+   imports con adjuntos-pendientes.js, y evaluar eso en el top-level del
+   módulo puede correr antes de que core-data.js termine de inicializarse. */
+export let mantTabFilMes=null;
+export function setMantTabFilMes(v){
+  mantTabFilMes=v;
+  renderMantDetail();
+}
+export function renderMantHistorialConFiltro(patente){
+  const mesActivo=mantTabFilMes===null?MESES[new Date().getMonth()]:mantTabFilMes;
+  const todosEventos=buildMantEventos(patente);
+  const eventos=mesActivo?todosEventos.filter(ev=>mesFromFecha(ev.fecha)===mesActivo):todosEventos;
+  mantEventosActual=eventos;
+  const pSafe=patente.replace(/'/g,"\\'");
+  const admin=isAdminUser();
+  const filtroHtml=`<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin:0 0 .6rem">
+    <p class="sec-lbl" style="margin:0">Historial</p>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <select onchange="setMantTabFilMes(this.value)" style="width:auto">
+        <option value=""${mantTabFilMes===''?' selected':''}>Todos los meses</option>
+        ${MESES.map(m=>`<option value="${m}"${mesActivo===m?' selected':''}>${m}</option>`).join('')}
+      </select>
+      <button class="dl-btn" style="background:#1D6F42;padding:6px 12px;font-size:11px" onclick="exportMantencionesExcel()" title="Exporta las mantenciones de todos los vehículos"><i class="ti ti-file-spreadsheet" aria-hidden="true"></i>Excel</button>
+      <button class="dl-btn" style="padding:6px 12px;font-size:11px" onclick="exportVehiculoPDF('${pSafe}')"><i class="ti ti-download" aria-hidden="true"></i>PDF</button>
+    </div>
+  </div>`;
+  const lista=eventos.length?`<div class="card" style="padding:0;overflow:hidden;margin-bottom:0">`+eventos.map((ev,i)=>`
+    <div class="reg-row">
+      <div class="reg-row-info">
+        <span class="reg-row-fecha">${ev.fecha?formatFecha(ev.fecha):'—'}</span>
+        <span class="reg-row-ot"><i class="ti ${ev.icon}" aria-hidden="true"></i> ${escapeHtml(ev.tipo)}</span>
+        <span class="reg-row-badges"><span class="badge ${ev.clase}">${ev.fotos.length?'Con foto':((ev.archivos&&ev.archivos.length)||ev.docId?'Documento':'Sin adjunto')}</span></span>
+      </div>
+      <div class="reg-row-actions">
+        <button class="btn-sec btn-sm" onclick="verDetalleMantencion(${i})"><i class="ti ti-eye" aria-hidden="true"></i> Ver detalle</button>
+        ${admin?`<button class="btn-del" style="display:inline-flex" title="Eliminar" onclick="eliminarEventoMantencion(${i})"><i class="ti ti-trash" aria-hidden="true"></i></button>`:''}
+      </div>
+    </div>`).join('')+`</div>`:`<p class="eval-empty">Sin mantenciones ni documentos registrados${mesActivo?' en '+mesActivo.charAt(0)+mesActivo.slice(1).toLowerCase():''}.</p>`;
+  return filtroHtml+lista;
+}
 /* Vista de "Reportes → Mantenciones": misma lista tipo OT que el historial de
    viajes, con Ver detalle / Editar / PDF por cada evento de mantención. */
+/* Mes vigente para el historial de Mantenciones en Reportes: arranca en el
+   mes actual (nada se pierde, se puede volver a "Todos los meses" para ver
+   el histórico completo) — mismo criterio que se usó en Dashboard, Reportes
+   de OTs, Seguimiento, etc. null = todavía no se tocó (usa el mes actual);
+   '' = el usuario eligió "Todos los meses" explícitamente. Ver la nota en
+   mantTabFilMes sobre por qué no se inicializa con MESES[...] directamente. */
+export let repMantFilMes=null;
+export function setRepMantFilMes(v){
+  repMantFilMes=v;
+  renderRepDetail();
+}
 export function repMantResumenHTML(patente){
   const vd=ensureVehData(patente);
-  const eventos=buildMantEventos(patente);
+  const mesActivo=repMantFilMes===null?MESES[new Date().getMonth()]:repMantFilMes;
+  const todosEventos=buildMantEventos(patente);
+  const eventos=mesActivo?todosEventos.filter(ev=>mesFromFecha(ev.fecha)===mesActivo):todosEventos;
   mantEventosActual=eventos;
   /* Resumen de Aceite y Revisión Técnica leído directamente de reglasMant
-     (la misma fuente que usa Estado de Flota), para que el semáforo mostrado
-     aquí sea siempre igual al de esa pantalla. */
+     (la misma fuente que usa Estado de Flota), usando siempre la fila más
+     reciente de cada tipo (reglaMasReciente) — Mantenciones ahora es un
+     historial con varias filas posibles por tipo, no una ficha única. */
   const clsMap={verde:'alto',amarillo:'medio',rojo:'bajo'};
   const reglaResumen=(nombre,icon)=>{
-    const r=(vd.reglasMant||[]).find(x=>x.desc===nombre);
+    const r=reglaMasReciente(vd.reglasMant,nombre);
     if(!r)return `<span class="eval-avg-badge sindata"><i class="ti ${icon}" aria-hidden="true"></i> ${nombre}: Sin datos</span>`;
     const est=calcEstadoReglaFlota(r,patente);
     return `<span class="eval-avg-badge ${clsMap[est.estado]||'sindata'}"><i class="ti ${icon}" aria-hidden="true"></i> ${nombre}: ${escapeHtml(est.vigenteTexto||est.pendiente||'—')}</span>`;
@@ -151,6 +194,13 @@ export function repMantResumenHTML(patente){
   const badges=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:1rem">
     ${reglaResumen('Cambio de Aceite','ti-droplet')}
     ${reglaResumen('Revisión Técnica','ti-clipboard-check')}
+  </div>`;
+  const filtroMes=`<div style="display:flex;align-items:center;gap:6px;margin-bottom:.8rem">
+    <label style="font-size:11px;font-weight:700;color:var(--text-muted)">Mes</label>
+    <select onchange="setRepMantFilMes(this.value)" style="width:auto">
+      <option value=""${repMantFilMes===''?' selected':''}>Todos los meses</option>
+      ${MESES.map(m=>`<option value="${m}"${mesActivo===m?' selected':''}>${m}</option>`).join('')}
+    </select>
   </div>`;
   const admin=isAdminUser();
   const lista=eventos.length?`<div class="card" style="padding:0;overflow:hidden;margin-bottom:0">`+eventos.map((ev,i)=>`
@@ -166,8 +216,8 @@ export function repMantResumenHTML(patente){
         <button class="btn-sec btn-sm" onclick="exportVehiculoPDF('${patente.replace(/'/g,"\\'")}')"><i class="ti ti-download" aria-hidden="true"></i> PDF</button>
         ${admin?`<button class="btn-del" style="display:inline-flex" title="Eliminar" onclick="eliminarEventoMantencion(${i})"><i class="ti ti-trash" aria-hidden="true"></i></button>`:''}
       </div>
-    </div>`).join('')+`</div>`:'<p class="eval-empty">Sin mantenciones ni documentos registrados para esta patente.</p>';
-  return badges+lista;
+    </div>`).join('')+`</div>`:`<p class="eval-empty">Sin mantenciones ni documentos registrados${mesActivo?' en '+mesActivo.charAt(0)+mesActivo.slice(1).toLowerCase():''} para esta patente.</p>`;
+  return badges+filtroMes+lista;
 }
 /* Abre el detalle completo de un evento de mantención (foto o documento incluido) */
 export function verDetalleMantencion(idx){
@@ -386,11 +436,10 @@ export function irAEditarMantencion(patente){
    (odómetro inicial, odómetro final y foto adicional) en tamaño grande. */
 export function verViajeModal(id){
   const u=unidades.find(x=>x.id===id);if(!u)return;
-  const integrantes=[u.i1,u.i2,u.i3,u.i4].filter(Boolean).join(', ')||'—';
+  const integrantes=(u.integrantes&&u.integrantes.length)?u.integrantes.join(', '):([u.i1,u.i2,u.i3,u.i4].filter(Boolean).join(', ')||'—');
   const rows=[
     ['Fecha',u.fecha?formatFecha(u.fecha):'—'],
     ['Mes',u.mes||'—'],
-    ['Tipo de registro',u.tipo||'—'],
     ['Conductor',u.conductor||'—'],
     ['Patente',u.patente||'—'],
     ['KM inicial',u.kmi!=null?Number(u.kmi).toLocaleString('es-CL'):'—'],
@@ -489,7 +538,7 @@ export async function exportViajePDF(id){
 
   y=pdfSectionBar(doc,y,marginX,pageW,'TRIPULACIÓN',[124,58,237]);
   pintarFilas([
-    ['Integrantes',[u.i1,u.i2,u.i3,u.i4].filter(Boolean).join(', ')||'—']
+    ['Integrantes',(u.integrantes&&u.integrantes.length)?u.integrantes.join(', '):([u.i1,u.i2,u.i3,u.i4].filter(Boolean).join(', ')||'—')]
   ]);
 
   if(u.detalle){
@@ -561,7 +610,6 @@ export function editarUnidadModal(id){
   const u=unidades.find(x=>x.id===id);if(!u)return;
   editUnidadId=id;
   g('ue-fecha').value=u.fecha||'';
-  fillSel('ue-tipo',tiposRegistroKm(),'');g('ue-tipo').value=u.tipo||'Registro de kilometraje';
   fillSel('ue-conductor',tecnicosList(),'');g('ue-conductor').value=u.conductor||'';
   fillSel('ue-patente',lists.vehiculos,'');g('ue-patente').value=u.patente||'';
   fillSel('ue-comb',lists.combustibles,'');g('ue-comb').value=u.comb||'FULL';
@@ -610,7 +658,6 @@ export async function saveUnidadEdit(){
   const u=unidades.find(x=>x.id===editUnidadId);if(!u)return;
   const prevSnapshot={...u,fotosKm:(u.fotosKm||[]).slice()};
   u.fecha=g('ue-fecha').value;u.mes=mesFromFecha(u.fecha);
-  u.tipo=g('ue-tipo').value;
   u.conductor=g('ue-conductor').value;
   u.patente=g('ue-patente').value;
   u.comb=g('ue-comb').value;
@@ -621,7 +668,7 @@ export async function saveUnidadEdit(){
   u.monto=parseInt(g('ue-monto').value)||0;
   if(!u.fotosKm)u.fotosKm=[];
   const pendientes=adjPendientes['uedit_kmfoto']||[];
-  if(pendientes.length)await subirArchivosACola(u.patente,pendientes,u.tipo,u.fotosKm);
+  if(pendientes.length)await subirArchivosACola(u.patente,pendientes,'Registro de kilometraje',u.fotosKm);
   if(u.fotosKm.length)u.fotoKmfPath=u.fotosKm[0].storagePath;
   const ok=await dbUpsertUnidad(u);
   if(!ok){

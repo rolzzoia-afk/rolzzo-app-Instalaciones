@@ -37,8 +37,6 @@ export let finstChecklist={};
 export function __set_finstChecklist(v){ finstChecklist = v; }
 export let finstEncuesta={};
 export function __set_finstEncuesta(v){ finstEncuesta = v; }
-export let finstFirmaClienteData=null;
-export let finstFirmaInstaladorData=null;
 
 export function finstToggleProducto(p){
   const i=finstProductos.indexOf(p);

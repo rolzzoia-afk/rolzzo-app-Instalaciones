@@ -4,7 +4,7 @@ import { abrirEscaner } from './escaner-documentos.js';
 import { CATS_NUEVO, CHECKLIST_INDUCCION, DIAS_SEMANA, PLAN_CAT, avgLabel, diasRestantes, escapeHtml, evalFotosOT, evaluacionesNuevo, formatFecha, generarResumen, nuevoPersonaList, safeId } from './evaluaciones.js';
 import { PDF_BAND_H, PDF_LOGO_H, catCellColor, clsToRGB, pdfCheckPageBreak, pdfDrawHeader, pdfDrawTitleBlock, pdfSectionBar } from './evaluaciones-pdf.js';
 import { g } from './form-helpers.js';
-import { calcRankingTecnicos, filtered } from './registro-adjuntos.js';
+import { calcRankingTecnicos, dedupeOtPrimeraVisita, filtered } from './registro-adjuntos.js';
 
 /* ===== SELECTOR "Foto / Galería / Escanear"    Reemplaza un <input type="file"> puntual ===== */
 export let filesrcCallback=null;
@@ -533,7 +533,7 @@ export function exportDashResumenPDF(){
   const inst=data.filter(r=>r.tipo==='Instalación').length;
   const gar=data.filter(r=>r.tipo==='Garantía').length;
   const conProb=data.filter(r=>r.problema&&!r.problema.toUpperCase().includes('NINGUNO')).length;
-  const conGoogle=data.filter(r=>evalFotosOT[r.ot]&&evalFotosOT[r.ot].googleReview).length;
+  const conGoogle=dedupeOtPrimeraVisita(data).filter(r=>evalFotosOT[r.ot]&&evalFotosOT[r.ot].googleReview).length;
   const totalCort=data.reduce((s,r)=>s+(r.cantidad||0),0);
   const filas=[
     ['Total de visitas',String(total)],
@@ -604,7 +604,7 @@ export function exportDashTodoPDF(){
   const inst=data.filter(r=>r.tipo==='Instalación').length;
   const gar=data.filter(r=>r.tipo==='Garantía').length;
   const conProb=data.filter(r=>r.problema&&!r.problema.toUpperCase().includes('NINGUNO')).length;
-  const conGoogle=data.filter(r=>evalFotosOT[r.ot]&&evalFotosOT[r.ot].googleReview).length;
+  const conGoogle=dedupeOtPrimeraVisita(data).filter(r=>evalFotosOT[r.ot]&&evalFotosOT[r.ot].googleReview).length;
   const totalCort=data.reduce((s,r)=>s+(r.cantidad||0),0);
 
   y=pdfSectionBar(doc,y,marginX,pageW,'RESUMEN GENERAL',[42,120,214]);

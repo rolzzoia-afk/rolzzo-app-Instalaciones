@@ -4,11 +4,10 @@ import { calcEstadoReglaFlota, renderEstadoFlota } from './estado-flota.js';
 import { escapeHtml, formatFecha, formatFechaHora, isAdminUser, safeId } from './evaluaciones.js';
 import { clsToRGB, pdfCheckPageBreak, pdfDrawHeader, pdfDrawTitleBlock, pdfSectionBar } from './evaluaciones-pdf.js';
 import { g } from './form-helpers.js';
-import { ensureVehData, kmActualVeh } from './mantenciones-vehiculos.js';
-import { flashGuardado, setEstadoVehiculo } from './periodo-helpers.js';
+import { ensureVehData, kmActualVeh, kmMasCercano } from './mantenciones-vehiculos.js';
 import { renderPendFab } from './pendientes-vehiculo.js';
 import { guardar, mostrarToastBar } from './registro-adjuntos.js';
-import { addMantNombreQuick, closeMantDetalleModal, currentUserName, unidadFotoUrl } from './reportes-unidad.js';
+import { buildMantEventos, closeMantDetalleModal, currentUserName, renderMantHistorialConFiltro, unidadFotoUrl } from './reportes-unidad.js';
 import { abrirSelectorArchivo, comprimirImagenSiHaceFalta, pdfAddPhotosPage } from './selector-foto-galeria.js';
 
 /* ===== ADJUNTOS PENDIENTES (dropzone + vista previa, mismo estilo que OT)    Sistema ge ===== */
@@ -126,16 +125,15 @@ export function verDetalleDocumentoVehiculo(idx){
       (reparaciones puntuales, permisos, boletas, etc.) — vive en
       vehiculoData[patente].items.
    Empieza CERRADO: al tocar el encabezado se despliega. */
-export let mantPanelOpen=false;
+export let mantPanelOpen=true;
 export function toggleMantPanel(){
   mantPanelOpen=!mantPanelOpen;
   renderMantDetail();
 }
 /* "Documentos antiguos" (vehiculoData[patente].documentos): documentos
-   sueltos cargados con el flujo anterior. Ya no se pueden agregar nuevos
-   por ahí (reemplazado por "Otras mantenciones y documentos" arriba), pero
-   se mantiene la vista de solo lectura + eliminar por si quedó algo
-   cargado con el flujo viejo. */
+   sueltos cargados con el flujo anterior a la unificación. Ya no se pueden
+   agregar nuevos por ahí, pero se mantiene la vista de solo lectura +
+   eliminar por si quedó algo cargado con el flujo viejo. */
 export let verDocsGuardados=false;
 export function toggleVerDocsGuardados(){
   verDocsGuardados=!verDocsGuardados;
@@ -147,46 +145,18 @@ export function renderMantDetail(){
   const patente=mantSelected;
   const vd=ensureVehData(patente);
   const sid=safeId(patente);
-  const pSafe=patente.replace(/'/g,"\\'");
-  const km=kmActualVeh(patente);
   const docsAntiguos=vd.documentos||[];
-  const totalCargado=(vd.reglasMant||[]).reduce((n,r)=>n+((r.documentos||[]).length),0)
-    +(vd.items||[]).reduce((n,it)=>n+((it.documentos||[]).length),0)
-    +docsAntiguos.length;
 
   el.innerHTML=`
-  <datalist id="mei-sugerencias">${[...(lists.mantNombres||[]),...(lists.docTypes||[])].map(n=>`<option value="${escapeHtml(n)}">`).join('')}</datalist>
-  <div class="card" style="--sec-color:#eda100">
-    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:.4rem">
-      <p class="card-title" style="margin:0;padding:0;border:none"><i class="ti ti-car" aria-hidden="true"></i>${escapeHtml(patente)}</p>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <button class="dl-btn" onclick="exportVehiculoPDF('${pSafe}')" title="Descargar ficha en PDF"><i class="ti ti-download" aria-hidden="true"></i>PDF</button>
-        <select id="mant-estado-${sid}" onchange="setEstadoVehiculo('${pSafe}',this.value)" style="width:auto">
-          <option ${vd.estado==='Operativo'?'selected':''}>Operativo</option>
-          <option ${vd.estado==='En taller'?'selected':''}>En taller</option>
-          <option ${vd.estado==='Fuera de servicio'?'selected':''}>Fuera de servicio</option>
-        </select>
-      </div>
-    </div>
-    <p style="font-size:11.5px;color:var(--text-muted);margin:0 0 .9rem">Kilometraje actual (según Unidad → Registro): <b>${km!==null?km.toLocaleString('es-CL')+' km':'Sin registros'}</b></p>
-    <div class="field" style="margin:0">
-      <label>Datos del vehículo</label>
-      <textarea id="veh-detalle-${sid}" rows="2" placeholder="Ej: Marca, modelo, año, N° de chasis, u otras especificaciones y notas generales del vehículo...">${escapeHtml(vd.detalle||'')}</textarea>
-    </div>
-    <button class="btn-sec btn-sm" id="veh-detalle-btn-${sid}" style="margin-top:.6rem" onclick="guardarDetalleVehiculo('${sid}')"><i class="ti ti-device-floppy" aria-hidden="true"></i>Guardar datos del vehículo</button>
-  </div>
-
   <div class="card" style="--sec-color:#eda100;padding:0;overflow:hidden">
     <div class="mant-panel-head" onclick="toggleMantPanel()">
-      <span><i class="ti ti-tool" aria-hidden="true"></i>Mantenciones<span class="mant-panel-count">${totalCargado}</span></span>
+      <span><i class="ti ti-tool" aria-hidden="true"></i>Mantenciones</span>
       <i class="sub-chevron ${mantPanelOpen?'open':''}" aria-hidden="true"></i>
     </div>
     ${mantPanelOpen?`<div class="mant-panel-body">
-      <p class="sec-lbl">Mantención oficial (con seguimiento de kilometraje)</p>
-      ${renderIngresoMantencion(patente,sid)}
+      ${renderMantFormUnificado(patente,sid)}
       <hr class="sep">
-      <p class="sec-lbl">Otras mantenciones y documentos</p>
-      ${renderItemsExtra(patente,sid)}
+      ${renderMantHistorialConFiltro(patente)}
       ${docsAntiguos.length?`
       <hr class="sep">
       <div class="sub-accordion-simple">
@@ -200,174 +170,134 @@ export function renderMantDetail(){
   </div>`;
   renderPendFab();
 }
-export async function guardarDetalleVehiculo(sid){
-  const patente=mantSelected;
-  if(!patente)return;
-  const el=g('veh-detalle-'+sid);
-  if(!el)return;
-  const vd=ensureVehData(patente);
-  const prev=vd.detalle;
-  vd.detalle=el.value;
-  const ok=await dbUpsertVehiculo(patente);
-  if(!ok){vd.detalle=prev;return;}
-  flashGuardado(g('veh-detalle-btn-'+sid));
-}
-/* Bloque "Ingreso de mantención": dropdown de nombre + fecha/km/detalle +
-   adjuntos. Si el nombre elegido ya tiene un registro guardado y quien
-   mira no es admin, se bloquea la edición (solo puede corregirlo un
-   administrador desde Estado de Flota o el detalle en Reportes). */
-export let ingresoMantNombre=null;
-export function __set_ingresoMantNombre(v){ ingresoMantNombre = v; }
-export function renderIngresoMantencion(patente,sid){
-  const vd=ensureVehData(patente);
-  const nombres=lists.mantNombres||[];
-  if(!nombres.length){
-    return '<p class="eval-empty" style="margin:0">No hay nombres de mantención en Listas todavía. <span class="patente-chip patente-chip-add" onclick="addMantNombreQuick()" title="Agregar nombre de mantención"><i class="ti ti-plus" aria-hidden="true"></i> Agregar en Listas</span></p>';
-  }
-  if(!ingresoMantNombre||!nombres.includes(ingresoMantNombre))__set_ingresoMantNombre(nombres[0]);
-  const nombre=ingresoMantNombre;
-  const params=MANT_PARAMS[nombre];
-  let regla=(vd.reglasMant||[]).find(r=>r.desc===nombre);
-  const yaRegistrada=!!(regla&&(regla.ultimoKm||regla.ultimaFecha||(regla.documentos&&regla.documentos.length)));
-  const bloqueado=yaRegistrada&&!isAdminUser();
-  const modo=regla?regla.modo:(params?params.modo:'km');
-  const fid='im_'+sid;
-  let html=`<div class="field" style="margin-bottom:.8rem">
-    <label>Mantención</label>
-    <select id="im-nombre-${sid}" onchange="ingresoMantNombre=this.value;renderMantDetail()">
-      ${nombres.map(n=>`<option value="${escapeHtml(n)}" ${n===nombre?'selected':''}>${escapeHtml(n)}</option>`).join('')}
-    </select>
-  </div>`;
-  if(bloqueado){
-    html+=`<p style="font-size:11.5px;color:var(--text-muted);margin:.6rem 0">Esta mantención ya fue registrada${regla.ultimaFecha?' el '+formatFecha(regla.ultimaFecha):''}${regla.ultimoKm?' ('+Number(regla.ultimoKm).toLocaleString('es-CL')+' km)':''}. Si el dato está mal, pide a un administrador que lo corrija.</p>`;
-    if(regla.documentos&&regla.documentos.length){
-      html+=`<p class="sec-lbl" style="margin-bottom:.4rem">Documento cargado</p>${renderMantFormDocs(patente,regla)}`;
-    }
-    /* La corrección de fecha/km/detalle sigue reservada a un administrador,
-       pero cualquiera puede seguir adjuntando respaldo adicional (boletas,
-       fotos, etc.) aunque la mantención ya esté registrada. */
-    html+=`<p class="sec-lbl" style="margin:.9rem 0 .4rem">Agregar más documentos</p>
-      <div>${renderBarraAdjuntos('mantadd_'+fid)}</div>
-      <button class="btn" style="margin-top:1rem;width:100%;justify-content:center" onclick="agregarDocumentosIngresoMantencion('${patente.replace(/'/g,"\\'")}','${fid}','${regla.id}')"><i class="ti ti-paperclip" aria-hidden="true"></i>Agregar documentos</button>`;
-    return html;
-  }
-  const intervaloKmPreview=params?(params.modo==='km'?params.intervaloKm:0):((regla&&regla.intervaloKm)||0);
-  const intervaloMesesPreview=params?(params.modo==='tiempo'?params.intervaloMeses:0):((regla&&regla.intervaloMeses)||0);
-  /* Fecha y kilometraje se piden SIEMPRE juntos, para cualquier mantención,
-     sin importar si su intervalo se mide en km o en meses — el modo solo
-     define cómo se calcula el semáforo en Estado de Flota, pero los campos
-     del formulario no cambian ni se ocultan según eso. */
-  html+=`<input type="hidden" id="mf-modo-${fid}" value="${modo}">
-    <div class="fg">
-      <div class="field"><label>Fecha</label><input type="date" id="mf-fecha-${fid}" value="${(regla&&regla.ultimaFecha)||''}"></div>
-      <div class="field"><label>Kilometraje en que se hizo</label><input type="number" id="mf-km-ultimo-${fid}" value="${(regla&&regla.ultimoKm)||''}" placeholder="Ej: 10000"></div>
+/* Formulario único de Mantenciones: un solo combo de tipo (escribible, con
+   sugerencias del catálogo combinado de Listas: mantenciones + documentos
+   del vehículo) + fecha + adjuntos. Reemplaza la antigua separación entre
+   "Mantención oficial" (solo catálogo fijo, con ficha única bloqueada) y
+   "Otras mantenciones y documentos" (texto libre) — ahora es un solo campo
+   y cada guardado agrega una fila nueva al historial (ver
+   guardarMantencionUnificada), sin bloqueo de admin. */
+export function renderMantFormUnificado(patente,sid){
+  const fid='mf_'+sid;
+  return `
+  <div class="fg">
+    <div class="field">
+      <label>Tipo de documento</label>
+      <div class="mant-combo-wrap">
+        <input type="text" id="mf-nombre-${fid}" autocomplete="off" placeholder="Ej: Cambio de Aceite, Permiso de Circulación..." oninput="filtrarComboMantencion('${fid}')" onfocus="filtrarComboMantencion('${fid}')" onblur="cerrarComboMantencion('${fid}')">
+        <div class="mant-combo-drop" id="mf-nombre-${fid}-drop" style="display:none"></div>
+      </div>
     </div>
-    <p style="font-size:10.5px;color:var(--text-muted);margin:-.3rem 0 .7rem">${modo==='km'?'Esta mantención se hace cada '+Number(intervaloKmPreview||0).toLocaleString('es-CL')+' km.':(intervaloMesesPreview?'Esta mantención se hace cada '+intervaloMesesPreview+' meses.':'')}</p>
-    <div class="field" style="margin-top:.7rem"><label>Detalle / taller</label><input type="text" id="mf-detalle-${fid}" value="${escapeHtml((regla&&regla.detalleTaller)||'')}" placeholder="Ej: Taller Pérez, repuesto original"></div>
-    <div class="field" style="margin-top:.6rem"><label>Comentario</label><textarea id="mf-comentario-${fid}" rows="2" placeholder="Notas adicionales sobre esta mantención">${escapeHtml((regla&&regla.comentario)||'')}</textarea></div>`;
-  if(regla&&regla.documentos&&regla.documentos.length){
-    html+=`<div style="margin-top:.9rem"><p class="sec-lbl" style="margin-bottom:.4rem">Documentos ya cargados</p>${renderMantFormDocs(patente,regla)}</div>`;
-  }
-  html+=`<div style="margin-top:.9rem">${renderBarraAdjuntos('mant_'+fid)}</div>
-    <button class="btn" style="margin-top:1rem;width:100%;justify-content:center" onclick="guardarIngresoMantencion('${patente.replace(/'/g,"\\'")}','${fid}','${nombre.replace(/'/g,"\\'")}')"><i class="ti ti-device-floppy" aria-hidden="true"></i>Guardar mantención</button>`;
-  return html;
+    <div class="field"><label>Fecha</label><input type="date" id="mf-fecha-${fid}" value="${new Date().toISOString().slice(0,10)}"></div>
+  </div>
+  <div class="field" style="margin-top:.5rem"><label>Detalle (opcional)</label><textarea id="mf-detalle-${fid}" rows="2" placeholder="Costo, taller, observaciones..."></textarea></div>
+  <div style="margin-top:.7rem">${renderBarraAdjuntos('mfadd_'+fid)}</div>
+  <button class="btn" style="margin-top:1rem;width:100%;justify-content:center" onclick="guardarMantencionUnificada('${patente.replace(/'/g,"\\'")}','${sid}')"><i class="ti ti-device-floppy" aria-hidden="true"></i>Guardar</button>`;
 }
-/* Cuadro grande y protagonista con el estado semáforo (verde/amarillo/rojo)
-   y el texto "VIGENTE HASTA: ..." o "VENCIDO · ...". */
-export function renderMantVigenteBox(est){
-  return `<div class="mant-vigente-box ${est.estado}">
-    <i class="ti ${est.estado==='rojo'?'ti-alert-triangle':(est.estado==='amarillo'?'ti-clock':'ti-circle-check')}" aria-hidden="true"></i>
-    <span>${escapeHtml(est.vigenteTexto)}</span>
-  </div>`;
+/* Combo escribible del "Tipo de documento": se arma a mano en vez de usar
+   <input list> con <datalist> porque el datalist nativo anda muy
+   inconsistente en navegadores móviles (Chrome Android no lo muestra como
+   un desplegable real ni filtra bien mientras se escribe). Al enfocar el
+   campo muestra todo el catálogo (Listas → mantNombres + docTypes); al
+   escribir, lo filtra por coincidencia en cualquier parte del texto (ej.
+   escribir "gases" encuentra "Certificado de Homologación de Gases"). Se
+   puede elegir una opción o simplemente seguir escribiendo un nombre libre
+   que no esté en la lista. */
+function catalogoMantenciones(){
+  return [...new Set([...(lists.mantNombres||[]),...(lists.docTypes||[])])];
 }
-/* Guarda el bloque "Ingreso de mantención": crea o actualiza la regla en
-   reglasMant (misma fuente que usa Estado de Flota) y sube los archivos
-   pendientes de su cola. Fecha y kilometraje se piden siempre juntos, para
-   cualquier mantención — Estado de Flota usa ese kilometraje para calcular
-   cuándo corresponde la próxima, según el intervalo propio de cada tipo de
-   mantención (definido en MANT_PARAMS). */
-export async function guardarIngresoMantencion(patente,fid,nombre){
+export function filtrarComboMantencion(fid){
+  const input=g('mf-nombre-'+fid);
+  const drop=g('mf-nombre-'+fid+'-drop');
+  if(!input||!drop)return;
+  const catalogo=catalogoMantenciones();
+  const q=(input.value||'').trim().toUpperCase();
+  const opciones=q?catalogo.filter(n=>n.toUpperCase().includes(q)):catalogo;
+  drop.innerHTML=opciones.length
+    ?opciones.map(n=>`<div class="mant-combo-item" onmousedown="event.preventDefault();elegirComboMantencion('${fid}','${n.replace(/'/g,"\\'")}')">${escapeHtml(n)}</div>`).join('')
+    :'<div class="mant-combo-empty">Sin coincidencias — puedes dejarlo como nombre libre.</div>';
+  drop.style.display='block';
+}
+export function elegirComboMantencion(fid,valor){
+  const input=g('mf-nombre-'+fid);
+  if(input)input.value=valor;
+  cerrarComboMantencion(fid);
+}
+/* onmousedown con preventDefault en cada opción evita que el blur del
+   input cierre el desplegable ANTES de registrar el click/tap sobre la
+   opción — si no, en el celular el tap nunca alcanza a seleccionar nada. */
+export function cerrarComboMantencion(fid){
+  const drop=g('mf-nombre-'+fid+'-drop');
+  if(drop)drop.style.display='none';
+}
+/* Ventana, en días, para avisar de un posible documento duplicado: mismo
+   tipo de mantención subido para la misma patente hace poco. */
+export const MANT_VENTANA_DUPLICADO_DIAS=7;
+/* Todo input[type=text] de la app se fuerza a mayúsculas al tipear (ver el
+   listener global en bootstrap.js) — así que lo que llega acá SIEMPRE viene
+   en mayúsculas, sea que lo hayan escrito o elegido del datalist. Sin
+   normalizar, "CAMBIO DE ACEITE" no calzaría ni con la clave de
+   MANT_PARAMS['Cambio de Aceite'] ni con el "desc" de una regla ya
+   guardada en su forma original — quedaría como un tipo nuevo y distinto
+   cada vez. Esta función lo hace calzar de vuelta con el nombre tal como
+   está en Listas (mantNombres/docTypes) cuando corresponde; si es un
+   nombre libre que no está en el catálogo, se deja tal cual llegó. */
+function nombreMantencionCanonico(valorIngresado){
+  const match=catalogoMantenciones().find(n=>n.toUpperCase()===valorIngresado.toUpperCase());
+  return match||valorIngresado;
+}
+/* Guarda una entrada del historial unificado de Mantenciones. SIEMPRE crea
+   una fila nueva en reglasMant (nunca sobreescribe una existente) — así el
+   mismo tipo se puede volver a registrar la próxima vez que corresponda,
+   sin bloqueo de administrador. Si el tipo tiene un intervalo definido en
+   Listas/MANT_PARAMS (las 12 mantenciones mecánicas), Estado de Flota
+   calcula un semáforo real; si no (documentos como SOAP, Permiso de
+   Circulación, etc.), aparece igual en Estado de Flota pero como "Sin
+   intervalo definido" (siempre verde). El kilometraje se auto-asocia con
+   kmMasCercano() — no se pide a mano. */
+export async function guardarMantencionUnificada(patente,sid){
+  const fid='mf_'+sid;
+  const nombre=nombreMantencionCanonico((g('mf-nombre-'+fid).value||'').trim());
+  const fecha=g('mf-fecha-'+fid).value;
+  const detalle=(g('mf-detalle-'+fid).value||'').trim();
+  if(!nombre){alert('Indica el tipo de documento (ej: Cambio de Aceite, Permiso de Circulación...).');return;}
+  if(!fecha){alert('Falta indicar la fecha.');return;}
   const vd=ensureVehData(patente);
   if(!vd.reglasMant)vd.reglasMant=[];
-  let regla=vd.reglasMant.find(r=>r.desc===nombre);
-  const esNueva=!regla;
-  if(!esNueva&&(regla.ultimoKm||regla.ultimaFecha||(regla.documentos&&regla.documentos.length))&&!isAdminUser()){
-    alert('Esta mantención ya fue registrada. Solo un administrador puede corregirla.');
-    return;
-  }
-  if(!regla){regla={id:'fm_'+Date.now(),desc:nombre,documentos:[],creadoPor:currentUserName(),creadoEn:new Date().toISOString()};vd.reglasMant.push(regla);}
-  regla.editadoPor=currentUserName();
-  regla.editadoEn=new Date().toISOString();
-  const params=MANT_PARAMS[nombre];
-  if(params){
-    regla.modo=params.modo;
-    regla.intervaloKm=params.modo==='km'?params.intervaloKm:0;
-    regla.intervaloMeses=params.modo==='tiempo'?params.intervaloMeses:0;
-  }else{
-    regla.modo=g('mf-modo-'+fid).value||'km';
-    regla.intervaloKm=0;regla.intervaloMeses=0;
-  }
-  const kmIngresado=parseInt(g('mf-km-ultimo-'+fid).value)||0;
-  const fechaIngresada=g('mf-fecha-'+fid).value||'';
-  if(!fechaIngresada){
-    alert('Falta indicar la fecha en que se hizo esta mantención.');
-    return;
-  }
-  if(!kmIngresado){
-    const kmA=kmActualVeh(patente);
-    if(kmA!==null&&kmA>0){
-      alert('Falta indicar el kilometraje en que se hizo esta mantención. El vehículo ya registra '+kmA.toLocaleString('es-CL')+' km — ingresa ese valor (o el km exacto) para que el cálculo de la próxima mantención sea correcto.');
-      return;
-    }
-  }
-  regla.ultimoKm=kmIngresado;
-  regla.ultimaFecha=fechaIngresada;
-  regla.detalleTaller=g('mf-detalle-'+fid).value;
-  regla.comentario=g('mf-comentario-'+fid).value;
-  if(!regla.documentos)regla.documentos=[];
-  const colaId='mant_'+fid;
-  const pendientes=adjPendientes[colaId]||[];
-  const subidos=await subirArchivosACola(patente,pendientes,nombre,regla.documentos);
-  const ok=await dbUpsertVehiculo(patente);
-  if(!ok){alert('No se pudo guardar. Intenta nuevamente.');return;}
-  limpiarAdjPendientes(colaId);
-  mostrarToastBar('Mantención guardada con éxito');
-  /* Tras guardar, el formulario vuelve a quedar en blanco: se selecciona la
-     primera mantención de la lista que todavía no tenga datos registrados,
-     para que la persona pueda seguir cargando la siguiente sin ver los
-     datos que recién ingresó (esos quedan disponibles en Reportes de
-     Unidad → Mantenciones, y en Estado de Flota). Si ya no queda ninguna
-     mantención pendiente, vuelve a la primera de la lista. */
-  const nombresList=lists.mantNombres||[];
-  const siguienteSinRegistrar=nombresList.find(n=>{
-    const r=(vd.reglasMant||[]).find(x=>x.desc===n);
-    return !r||!(r.ultimoKm||r.ultimaFecha);
+  const fechaMs=new Date(fecha+'T12:00:00').getTime();
+  const posibleDuplicado=vd.reglasMant.some(r=>{
+    if((r.desc||'').toUpperCase()!==nombre.toUpperCase()||!r.ultimaFecha)return false;
+    const dias=Math.abs(fechaMs-new Date(r.ultimaFecha+'T12:00:00').getTime())/86400000;
+    return dias<=MANT_VENTANA_DUPLICADO_DIAS;
   });
-  __set_ingresoMantNombre(siguienteSinRegistrar||nombresList[0]||null);
-  renderMantDetail();
-  renderEstadoFlota&&renderEstadoFlota();
-}
-/* Permite agregar más documentos a una mantención que ya fue registrada,
-   sin tocar fecha/km/detalle/comentario (esos siguen reservados a un
-   administrador vía guardarIngresoMantencion). A diferencia de esa función,
-   esta NO exige ser admin: cualquiera puede seguir adjuntando respaldo. */
-export async function agregarDocumentosIngresoMantencion(patente,fid,reglaId){
-  const vd=ensureVehData(patente);
-  const regla=(vd.reglasMant||[]).find(r=>r.id===reglaId);
-  if(!regla)return;
-  const colaId='mantadd_'+fid;
+  if(posibleDuplicado){
+    const seguro=confirm(`Ya se subió un documento de "${nombre}" hace poco para ${patente}.\n\n¿Seguro que es la patente y la mantención correctas?`);
+    if(!seguro)return;
+  }
+  const params=MANT_PARAMS[nombre];
+  const modo=params?params.modo:'km';
+  const intervaloKm=params&&params.modo==='km'?params.intervaloKm:0;
+  const intervaloMeses=params&&params.modo==='tiempo'?params.intervaloMeses:0;
+  const kmAuto=kmMasCercano(patente,fecha);
+  const regla={
+    id:'fm_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),
+    desc:nombre,modo,intervaloKm,intervaloMeses,
+    ultimoKm:kmAuto||0,ultimaFecha:fecha,
+    detalleTaller:detalle,comentario:'',documentos:[],
+    creadoPor:currentUserName(),creadoEn:new Date().toISOString()
+  };
+  const colaId='mfadd_'+fid;
   const pendientes=adjPendientes[colaId]||[];
-  if(!pendientes.length){
-    alert('No hay ningún archivo elegido todavía. Toca el recuadro para elegir cámara, galería o escanear.');
+  await subirArchivosACola(patente,pendientes,nombre,regla.documentos);
+  vd.reglasMant.push(regla);
+  const ok=await dbUpsertVehiculo(patente);
+  if(!ok){
+    vd.reglasMant=vd.reglasMant.filter(x=>x.id!==regla.id);
+    alert('No se pudo guardar. Intenta nuevamente.');
     return;
   }
-  if(!regla.documentos)regla.documentos=[];
-  const subidos=await subirArchivosACola(patente,pendientes,regla.desc,regla.documentos);
-  if(!subidos){renderMantDetail();return;}
-  const ok=await dbUpsertVehiculo(patente);
-  if(!ok){alert('No se pudo guardar en la base de datos. Intenta nuevamente.');return;}
   limpiarAdjPendientes(colaId);
-  mostrarToastBar('Documento agregado con éxito');
+  mostrarToastBar('Mantención guardada con éxito'+(kmAuto?' · '+kmAuto.toLocaleString('es-CL')+' km asociados automáticamente':''));
   renderMantDetail();
   renderEstadoFlota&&renderEstadoFlota();
 }
@@ -465,63 +395,13 @@ export async function eliminarDocumentoItemExtra(patente,itemId,docId){
   if(doc&&doc.storagePath&&sb)sb.storage.from('vehiculo-documentos').remove([doc.storagePath]).catch(()=>{});
   renderMantDetail();
 }
-/* "Otras mantenciones y documentos": reemplaza al antiguo panel separado
-   "Documentos del vehículo". Nombre libre (con sugerencias de mantNombres +
-   docTypes vía <datalist>) + fecha + detalle + adjuntos, para todo lo que no
-   es una mantención periódica oficial: reparaciones puntuales, permisos,
-   boletas, etc. Usa la misma cola de adjuntos (adjPendientes) y el mismo
-   dropzone que el resto de la app, y guarda los documentos con la misma
-   forma que regla.documentos para poder reusar renderMantFormDocs. */
-export function renderItemsExtra(patente,sid){
-  const vd=ensureVehData(patente);
-  const items=(vd.items||[]).slice().sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
-  const pSafe=patente.replace(/'/g,"\\'");
-  let html='';
-  if(items.length){
-    html+=items.map(it=>`
-    <div class="eval-section">
-      <div class="eval-section-head">
-        <span class="eval-section-title">${escapeHtml(it.nombre)}<span class="eval-section-date">${it.fecha?formatFecha(it.fecha):''}</span></span>
-        <button class="btn-del" onclick="removeItemExtra('${pSafe}','${it.id}')" title="Eliminar"><i class="ti ti-trash" aria-hidden="true"></i></button>
-      </div>
-      ${it.detalle?`<p style="font-size:11.5px;color:var(--text-secondary);white-space:pre-wrap">${escapeHtml(it.detalle)}</p>`:''}
-      ${renderMantFormDocs(patente,it,'item')}
-    </div>`).join('');
-  }else{
-    html+='<p class="eval-empty">Sin otras mantenciones ni documentos registrados todavía.</p>';
-  }
-  html+=`
-  <div class="fg" style="margin-top:.8rem">
-    <div class="field"><label>Nombre</label><input type="text" id="mei-nombre-${sid}" list="mei-sugerencias" placeholder="Ej: Reparación de cableado, Permiso de circulación..."></div>
-    <div class="field"><label>Fecha</label><input type="date" id="mei-fecha-${sid}"></div>
-  </div>
-  <div class="field" style="margin-top:.5rem"><label>Detalle (opcional)</label><textarea id="mei-detalle-${sid}" rows="2" placeholder="Costo, taller, observaciones..."></textarea></div>
-  <div style="margin-top:.7rem">${renderBarraAdjuntos('itemadd_'+sid)}</div>
-  <button class="btn btn-sm" style="margin-top:.7rem" onclick="addItemExtra('${pSafe}','${sid}')"><i class="ti ti-plus" aria-hidden="true"></i>Agregar</button>`;
-  return html;
-}
-export async function addItemExtra(patente,sid){
-  const nombre=g('mei-nombre-'+sid).value.trim();
-  const fecha=g('mei-fecha-'+sid).value;
-  const detalle=g('mei-detalle-'+sid).value.trim();
-  if(!nombre){alert('Ponle un nombre (ej: Reparación de cableado, Permiso de circulación...).');return;}
-  if(!fecha){alert('Falta indicar la fecha.');return;}
-  const vd=ensureVehData(patente);
-  if(!vd.items)vd.items=[];
-  const item={id:Date.now()+'_'+Math.random().toString(36).slice(2,6),nombre,fecha,detalle,documentos:[],creadoPor:currentUserName(),creadoEn:new Date().toISOString()};
-  const colaId='itemadd_'+sid;
-  const pendientes=adjPendientes[colaId]||[];
-  await subirArchivosACola(patente,pendientes,nombre,item.documentos);
-  vd.items.push(item);
-  const ok=await dbUpsertVehiculo(patente);
-  if(!ok){
-    vd.items=vd.items.filter(x=>x.id!==item.id);
-    return;
-  }
-  limpiarAdjPendientes(colaId);
-  mostrarToastBar('Registro agregado con éxito');
-  renderMantDetail();
-}
+/* "Otras mantenciones y documentos" (vehiculoData[patente].items): flujo
+   anterior a la unificación, reemplazado por el formulario único de
+   Mantenciones (ver renderMantFormUnificado/guardarMantencionUnificada) —
+   ya no se agregan items nuevos. Se conserva solo la posibilidad de
+   eliminar un item viejo (removeItemExtra) para poder limpiar datos
+   cargados con el flujo anterior; siguen mostrándose en el historial
+   unificado (buildMantEventos) para no perder nada de lo ya guardado. */
 export async function removeItemExtra(patente,id){
   if(!confirm('¿Eliminar este registro?'))return;
   const vd=ensureVehData(patente);
