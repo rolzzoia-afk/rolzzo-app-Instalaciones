@@ -12,13 +12,15 @@ import { renderAdmin } from './listas-admin.js';
 import { confirmLogout, logout } from './login.js';
 import { renderRegReportes } from './periodo-helpers.js';
 import { renderPersonas } from './personas.js';
+import { garInitPane } from './garantia.js';
 import { finstInitPane } from './reporte-instalacion-selector-ot.js';
 import { renderReportes } from './reportes-unidad.js';
+import { renderRutasPane } from './rutas.js';
 import { renderUniregChips } from './unidad-patente-selector.js';
 
 /* ===== NAV ===== */
 export const ALL_PERM_ITEMS=[
-  {key:'regnew',label:'Registro · Registro (nueva visita)'},{key:'regrep',label:'Registro · Reportes'},{key:'reg_formulario',label:'Registro · Formulario (reporte de instalación)'},{key:'dash',label:'Dashboard'},
+  {key:'regnew',label:'Registro · Registro (nueva visita)'},{key:'regrep',label:'Registro · Reportes'},{key:'reg_formulario',label:'Registro · Formulario (reporte de instalación)'},{key:'reg_garantia',label:'Registro · Garantías'},{key:'dash',label:'Dashboard'},{key:'rutas',label:'Rutas'},
   {key:'unireg',label:'Unidad · Registro'},{key:'unimant',label:'Unidad · Mantenciones'},{key:'uniflota',label:'Unidad · Estado de flota'},{key:'unirep',label:'Unidad · Reportes'},
   {key:'seg_resenas',label:'Seguimiento · Reseñas'},{key:'seg_fotos',label:'Seguimiento · Evaluación de Fotos'},{key:'seg_reportes',label:'Seguimiento · Reportes'},
   {key:'evalnuevo',label:'Evaluaciones · Personal Nuevo'},
@@ -28,7 +30,7 @@ export function hasAccess(key){
   if(!session)return false;
   if(session.rol==='admin')return true;
   const p=personas.find(x=>x.codigo===session.codigo);
-  const permisos=(p&&p.permisos)||['regnew','regrep','reg_formulario','dash','unireg','unimant','uniflota','unirep','seg_resenas','seg_fotos'];
+  const permisos=(p&&p.permisos)||['regnew','regrep','reg_formulario','reg_garantia','dash','rutas','unireg','unimant','uniflota','unirep','seg_resenas','seg_fotos'];
   return permisos.includes(key);
 }
 export function firstAccessibleTab(){
@@ -129,7 +131,9 @@ export function sw(t){
   }
   if(t==='regnew')renderFotografosRows();
   if(t==='reg_formulario')finstInitPane();
+  if(t==='reg_garantia')garInitPane();
   if(t==='dash')renderDash();
+  if(t==='rutas')renderRutasPane();
   if(t==='unireg'){renderUniregChips();renderUniTable();actualizarKmSugerido();renderUFotoKmDropzone();renderUniIntegrantesRows();}
   if(t==='unimant')renderMantenciones();
   if(t==='uniflota')renderEstadoFlota();
@@ -172,7 +176,7 @@ export async function refreshDatosCompartidos(){
       sb.from('rolzzo_eval_nuevo').select('*')
     ]);
     if(reg.data)__set_registros(reg.data.map(r=>({
-      id:r.id,fecha:r.fecha,mes:r.mes,tipo:r.tipo,ot:r.ot,cliente:r.cliente,
+      id:r.id,fecha:r.fecha,mes:r.mes,tipo:r.tipo,categoriaVenta:r.categoria_venta||'A',ot:r.ot,cliente:r.cliente,
       tec1:r.tec1,tec2:r.tec2,tec3:r.tec3,tec4:r.tec4,tecnicosExtra:r.tecnicos_extra||[],
       hinicio:r.hinicio,hsalida:r.hsalida,durMin:r.dur_min,
       traslado:r.traslado,tipoCortina:r.tipo_cortina,cantidad:r.cantidad,productos:r.productos||[],

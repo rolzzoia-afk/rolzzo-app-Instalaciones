@@ -1,7 +1,7 @@
 import { dbUpsertRegistro, sb, sbReady } from './bootstrap.js';
 import { registros, rgVals } from './core-data.js';
 import { formatFecha } from './evaluaciones.js';
-import { g } from './form-helpers.js';
+import { consultarNominatim, g } from './form-helpers.js';
 import { FINST_CHECKLIST, FINST_ENCUESTA, finstChecklist, finstEncuesta, finstProductos } from './reporte-instalacion-catalogos.js';
 import { finstFirmaBase64 } from './reporte-instalacion-firma.js';
 import { finstRegistroEncontrado } from './reporte-instalacion-selector-ot.js';
@@ -73,18 +73,6 @@ async function cargarPlantilla(PDFDocument) {
   return PDFDocument.load(bytes);
 }
 
-/* Dirección de instalación → coordenadas GPS, usando el geocodificador
-   público de OpenStreetMap (gratis, sin API key). Si falla o no hay
-   dirección, se sigue igual sin coordenadas — no bloquea la firma. */
-async function consultarNominatim(query) {
-  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=cl&q=${encodeURIComponent(query)}`;
-  const res = await fetch(url, { headers: { 'Accept-Language': 'es' } });
-  if (!res.ok) return null;
-  const data = await res.json();
-  if (!data || !data.length) return null;
-  return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
-}
-
 /* Nominatim exige coincidencia bastante exacta del nombre de calle: una
    dirección real con tipeos o con el sufijo largo del combo de región
    ("RM - Región Metropolitana") puede no devolver nada. Se reintenta con
@@ -121,7 +109,7 @@ function direccionInstalacion() {
 /* Corta un texto largo en varias líneas que quepan en maxW, usando el mismo
    font ya embebido — para "Observación de instalación" (única línea larga
    en el original, pero el texto real puede ser más largo). */
-function envolverTexto(font, size, text, maxW) {
+export function envolverTexto(font, size, text, maxW) {
   const palabras = (text || '').split(/\s+/).filter(Boolean);
   const lineas = [];
   let actual = '';

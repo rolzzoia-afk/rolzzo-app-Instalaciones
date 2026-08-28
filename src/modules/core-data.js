@@ -129,9 +129,11 @@ export const NAV_ITEMS=[
   {key:'reg',label:'Registro',icon:'ti-edit',color:'#2a78d6',adminOnly:false,children:[
     {key:'regnew',label:'Registro',icon:'ti-edit',color:'#2a78d6',sub:'Nueva visita de instalación'},
     {key:'regrep',label:'Reportes',icon:'ti-report',color:'#2a78d6',sub:'Historial de OTs'},
-    {key:'reg_formulario',label:'Formulario',icon:'ti-clipboard-check',color:'#2a78d6',sub:'Reporte de instalación y certificado de conformidad'}
+    {key:'reg_formulario',label:'Formulario',icon:'ti-clipboard-check',color:'#2a78d6',sub:'Reporte de instalación y certificado de conformidad'},
+    {key:'reg_garantia',label:'Garantías',icon:'ti-shield-check',color:'#2a78d6',sub:'Informe de garantía / instalación'}
   ]},
   {key:'dash',label:'Dashboard',icon:'ti-chart-bar',color:'#0F9D8A',sub:'Indicadores generales',adminOnly:false},
+  {key:'rutas',label:'Rutas',icon:'ti-route',color:'#0B7285',sub:'Creador de rutas optimizadas',adminOnly:false},
   {key:'uni',label:'Unidad',icon:'ti-car',color:'#eda100',adminOnly:false,children:[
     {key:'unireg',label:'Registro',icon:'ti-edit',color:'#eda100',sub:'Registro de vehículo'},
     {key:'unimant',label:'Mantenciones',icon:'ti-tool',color:'#eda100',sub:'Aceite, revisión técnica y documentos'},
@@ -178,3 +180,5 @@ export let session=null;
 export function __set_session(v){ session = v; }
 export let editMode=false;
 export function __set_editMode(v){ editMode = v; }
+export let rutas=[];
+export function __set_rutas(v){ rutas = v; }

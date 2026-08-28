@@ -1,7 +1,7 @@
 import { loadPersonas, validarPinServidor } from './bootstrap.js';
 import { renderColorPopover } from './color-sistema.js';
 import { __set_editMode, __set_session, editMode, session } from './core-data.js';
-import { g } from './form-helpers.js';
+import { g, populateForms } from './form-helpers.js';
 import { buildNav, firstAccessibleTab, sw } from './nav.js';
 import { restoreRegDraft } from './registro-adjuntos.js';
 
@@ -60,8 +60,11 @@ export async function checkPin(){
 }
 /* Tiempo máximo de inactividad antes de exigir un nuevo login (en minutos).
    Si la persona no toca la app por más de este tiempo, aunque la pestaña
-   siga abierta o se recargue, se le pide el PIN de nuevo por seguridad. */
-export const SESION_INACTIVIDAD_MIN=30;
+   siga abierta o se recargue, se le pide el PIN de nuevo por seguridad.
+   8 horas = un turno completo: una OT que se empieza en la mañana debe
+   poder retomarse aunque pasen varias horas sin usar la app (viaje,
+   almuerzo, corte de señal en terreno, etc). */
+export const SESION_INACTIVIDAD_MIN=8*60;
 export function tocarActividadSesion(){
   if(!session)return;
   try{localStorage.setItem('rolzzo_session_actividad',String(Date.now()));}catch(e){}
@@ -73,6 +76,7 @@ export async function doLogin(p){
     localStorage.setItem('rolzzo_session_actividad',String(Date.now()));
   }catch(e){}
   await loadPersonas();
+  populateForms();
   document.getElementById('login-screen').style.display='none';
   document.getElementById('shell').style.display='flex';
   document.getElementById('sb-avatar').textContent=p.nombre.split(' ').map(w=>w[0]).slice(0,2).join('');
@@ -106,21 +110,27 @@ export async function tryRestoreSession(){
     return false;
   }
   const r=await validarPinServidor(saved.codigo);
-  if(!r.ok){
-    // Si fue un problema de red (Edge Function/Supabase no disponible), no
-    // borramos la sesión guardada: se reintenta la próxima vez que se abra
-    // la app. Si el código genuinamente ya no existe (persona eliminada o
-    // código cambiado por un admin), ahí sí se limpia y se pide PIN de nuevo.
-    if(!r.network){
-      try{
-        localStorage.removeItem('rolzzo_session');
-        localStorage.removeItem('rolzzo_session_actividad');
-      }catch(e){}
-    }
-    return false;
+  if(r.ok){
+    await doLogin(r.persona);
+    return true;
   }
-  await doLogin(r.persona);
-  return true;
+  if(r.network){
+    // Sin internet no se puede revalidar el PIN contra el servidor, pero
+    // esta sesión ya se validó antes y sigue dentro de la ventana de
+    // inactividad permitida: se confía en los datos guardados localmente
+    // para no dejar a la persona bloqueada sin poder retomar su OT en
+    // terreno. No se borra la sesión guardada: se reintenta la próxima vez
+    // que haya señal.
+    await doLogin(saved);
+    return true;
+  }
+  // El código genuinamente ya no existe (persona eliminada o código
+  // cambiado por un admin): ahí sí se limpia y se pide PIN de nuevo.
+  try{
+    localStorage.removeItem('rolzzo_session');
+    localStorage.removeItem('rolzzo_session_actividad');
+  }catch(e){}
+  return false;
 }
 export function logout(){
   __set_session(null);__set_editMode(false);document.body.classList.remove('edit-on');

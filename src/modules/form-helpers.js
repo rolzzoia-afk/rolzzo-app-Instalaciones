@@ -79,7 +79,24 @@ export function anclajeLabel(anclaje){
    de 5 opciones. Se guarda en rgVals['rg-niveldif'] con estos códigos. */
 export const NIVELDIF_LABELS={MUY_BAJO:'Muy bajo',BAJO:'Bajo',MEDIO:'Medio',ALTO:'Alto',MUY_ALTO:'Muy alto'};
 export function nivelDifLabel(v){return NIVELDIF_LABELS[v]||v||'—';}
+/* Categoría de venta: un único botón grande que alterna A (verde) / B (azul),
+   en vez de la lista de opciones .ro que usa selRg(). Se guarda igual en
+   rgVals para que el resto del flujo (borrador, guardar, editar OT) lo trate
+   como cualquier otro campo rg-. */
+export function toggleCategoriaVenta(){
+  rgVals['rg-categoria']=rgVals['rg-categoria']==='A'?'B':'A';
+  syncCatVentaBtn();
+  scheduleRegDraftSave();
+}
+export function syncCatVentaBtn(){
+  const btn=g('btn-cat-venta');
+  if(!btn)return;
+  const val=rgVals['rg-categoria']||'A';
+  btn.textContent=val;
+  btn.classList.toggle('cat-b',val==='B');
+}
 export function initRgValsDefaults(){
+  rgVals['rg-categoria']='A';
   rgVals['rg-tipo']='Instalación';
   rgVals['rg-niveldif']='MEDIO';
   rgVals['rg-anclaje']='TECHO';
@@ -126,6 +143,17 @@ export function formatearRutInput(el){
   el.value=cuerpoFmt+'-'+dv;
 }
 export function g(id){return document.getElementById(id);}
+/* Dirección → coordenadas GPS, usando el geocodificador público de
+   OpenStreetMap (gratis, sin API key). Compartido por el certificado de
+   conformidad, el informe de garantía y el creador de rutas. */
+export async function consultarNominatim(query) {
+  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=cl&q=${encodeURIComponent(query)}`;
+  const res = await fetch(url, { headers: { 'Accept-Language': 'es' } });
+  if (!res.ok) return null;
+  const data = await res.json();
+  if (!data || !data.length) return null;
+  return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
+}
 export function fillSel(id,arr,first){
   const el=g(id);
   if(!el)return;

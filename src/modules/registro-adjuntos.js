@@ -5,12 +5,13 @@ import { renderDash, renderUniTable } from './dashboard-kpis.js';
 import { dbUpsertEvalFotosOT, ensureEvalFotosOT, esMiOT, escapeHtml, evalFotosOT, evaluacionesFotos, isAdminUser } from './evaluaciones.js';
 import { renderSegResenas } from './evaluaciones-extra.js';
 import { __set_extraRows, extraRows, extrasValidos, renderExtraRows } from './form-adicionales-garantia.js';
-import { actualizarCamposGiftcard, actualizarWhatsappRegistro, calcDur, fillSel, g, selRg, toggleAnclaje } from './form-helpers.js';
+import { actualizarCamposGiftcard, actualizarWhatsappRegistro, calcDur, fillSel, g, selRg, syncCatVentaBtn, toggleAnclaje } from './form-helpers.js';
 import { __set_productoRows, productoRows, productosValidos, renderProductoRows } from './form-productos.js';
 import { __set_fotografos, __set_materialRows, __set_tecnicosExtra, fotografos, fotografosValidos, materialRows, materialesValidos, renderFotografosRows, renderMaterialRows, renderTecnicosExtra, resetFotografos, resetMaterialRows, resetUniIntegrantes, tecnicosExtra, tecnicosExtraValidos, uniIntegrantesValidos } from './form-tecnicos-extra.js';
 import { kmActualVeh } from './mantenciones-vehiculos.js';
 import { sw } from './nav.js';
 import { getRegdetCurrentId, mesInputARango, renderRegReportes, verDetalleRegistro } from './periodo-helpers.js';
+import { clearDraftFiles, deleteDraftFile, getDraftFiles, saveDraftFile } from './reg-draft-adjuntos-db.js';
 import { populateComunasForRegion } from './regiones-comunas.js';
 import { currentUserName } from './reportes-unidad.js';
 import { comprimirImagenSiHaceFalta, limpiarPreviewArchivo } from './selector-foto-galeria.js';
@@ -28,7 +29,14 @@ export let regAdjuntosYaSubidos=[];
    de crear una nueva. Ver iniciarEdicionOT() / cancelarEdicionOT(). */
 export let regEditingId=null;
 export function handleRegAdjuntosSelected(fileList){
-  [...fileList].forEach(f=>regAdjuntosPendientes.push(f));
+  const draftKey=regDraftKey();
+  [...fileList].forEach(f=>{
+    regAdjuntosPendientes.push(f);
+    /* Se guarda también en IndexedDB (no solo en memoria) para que, si la
+       página se recarga o el navegador mata la pestaña antes de guardar la
+       OT, la foto ya elegida no se pierda — igual que el resto del borrador. */
+    saveDraftFile(draftKey,f).then(id=>{if(id!=null)f._draftDbId=id;});
+  });
   renderRegAdjuntosPendientes();
 }
 export function renderRegAdjuntosYaSubidos(){
@@ -60,7 +68,27 @@ export function renderRegAdjuntosPendientes(){
     return `<div class="ot-pending-card">${inner}<button class="rm" onclick="removeRegAdjuntoPendiente(${i})" title="Quitar"></button></div>`;
   }).join('')+'</div>';
 }
-export function removeRegAdjuntoPendiente(i){regAdjuntosPendientes.splice(i,1);renderRegAdjuntosPendientes();}
+export function removeRegAdjuntoPendiente(i){
+  const f=regAdjuntosPendientes[i];
+  if(f&&f._draftDbId!=null)deleteDraftFile(f._draftDbId);
+  regAdjuntosPendientes.splice(i,1);
+  renderRegAdjuntosPendientes();
+}
+/* Trae de vuelta al formulario las fotos/PDF que quedaron guardados en
+   IndexedDB para el borrador de este operador (ver handleRegAdjuntosSelected).
+   Se llama al retomar una OT pendiente, para que las fotos ya elegidas
+   antes de que se cayera la conexión o se recargara la página vuelvan a
+   aparecer listas para subir. */
+export async function restoreRegAdjuntosPendientesFromDb(){
+  const rows=await getDraftFiles(regDraftKey());
+  if(!rows.length)return;
+  regAdjuntosPendientes=rows.map(row=>{
+    const f=new File([row.blob],row.name,{type:row.type});
+    f._draftDbId=row.id;
+    return f;
+  });
+  renderRegAdjuntosPendientes();
+}
 async function subirArchivosGenerico(files,ot){
   const by=currentUserName();
   const subidos=[];
@@ -269,7 +297,7 @@ async function guardarInterno(){
   const materiales=materialesValidos();
   const r={
     id:Date.now(),fecha:g('f-fecha').value,mes:g('f-mes').value,
-    tipo:rgVals['rg-tipo']||'',ot,cliente:g('f-cliente').value,
+    tipo:rgVals['rg-tipo']||'',categoriaVenta:rgVals['rg-categoria']||'A',ot,cliente:g('f-cliente').value,
     tec1:g('f-tec1').value,tec2:g('f-tec2').value,tec3:g('f-tec3').value,tec4:g('f-tec4').value,
     tecnicosExtra:tecnicosExtraValidos(),
     hinicio:hi,hsalida:hs,durMin,traslado:g('f-traslado').value,
@@ -352,7 +380,7 @@ export function registroToDraftFields(r){
       'f-giftcard-codigo':r.giftcardCodigo||'','f-giftcard-desc':(r.giftcardDescuento??'')
     },
     rgVals:{
-      'rg-tipo':r.tipo||'Instalación','rg-niveldif':r.nivelDif||'MEDIO','rg-anclaje':r.anclaje||'',
+      'rg-tipo':r.tipo||'Instalación','rg-categoria':r.categoriaVenta||'A','rg-niveldif':r.nivelDif||'MEDIO','rg-anclaje':r.anclaje||'',
       'rg-giftcard':r.giftcard||'No','rg-google':r.google||'No','rg-video':r.video||'No','rg-fotovideo':r.fotoVideo||'No','rg-danos':r.danos||'No'
     },
     productoRows:(r.productos&&r.productos.length)?r.productos.map(p=>({tipo:p.tipo||'',cantidad:p.cantidad||'',codigo:p.codigo||''})):[{tipo:'',cantidad:'',codigo:''}],
@@ -416,7 +444,7 @@ export async function guardarEdicionOT(){
   const otAnterior=r.ot;
   Object.assign(r,{
     fecha:g('f-fecha').value,mes:g('f-mes').value,
-    tipo:rgVals['rg-tipo']||'',ot,cliente:g('f-cliente').value,
+    tipo:rgVals['rg-tipo']||'',categoriaVenta:rgVals['rg-categoria']||'A',ot,cliente:g('f-cliente').value,
     tec1:g('f-tec1').value,tec2:g('f-tec2').value,tec3:g('f-tec3').value,tec4:g('f-tec4').value,
     tecnicosExtra:tecnicosExtraValidos(),
     hinicio:hi,hsalida:hs,durMin,traslado:g('f-traslado').value,
@@ -514,7 +542,9 @@ export function saveRegDraft(){
   }catch(e){}
 }
 export function clearRegDraft(){
-  try{localStorage.removeItem(regDraftKey());}catch(e){}
+  const draftKey=regDraftKey();
+  try{localStorage.removeItem(draftKey);}catch(e){}
+  clearDraftFiles(draftKey);
 }
 /* Aplica un objeto de borrador al formulario visible (sin tocarlo si viene vacío). */
 export function applyRegDraftToForm(draft){
@@ -523,6 +553,7 @@ export function applyRegDraftToForm(draft){
     if(draft.rgVals){
       Object.keys(draft.rgVals).forEach(k=>{
         rgVals[k]=draft.rgVals[k];
+        if(k==='rg-categoria'){syncCatVentaBtn();return;}
         const grp=g(k);
         if(grp){
           grp.querySelectorAll('.ro').forEach(x=>{
@@ -569,7 +600,7 @@ export function applyRegDraftToForm(draft){
 }
 /* Limpia el formulario a un estado en blanco, sin guardar nada. */
 export function blankRegForm(){
-  rgVals['rg-tipo']='Instalación';rgVals['rg-niveldif']='MEDIO';rgVals['rg-anclaje']='TECHO';
+  rgVals['rg-categoria']='A';rgVals['rg-tipo']='Instalación';rgVals['rg-niveldif']='MEDIO';rgVals['rg-anclaje']='TECHO';
   rgVals['rg-google']='No';rgVals['rg-video']='No';rgVals['rg-fotovideo']='No';rgVals['rg-danos']='No';rgVals['rg-giftcard']='No';
   applyRegDraftToForm({fields:{},rgVals:{...rgVals}});
   resetMaterialRows();
@@ -589,16 +620,27 @@ export function otDraftLabel(d){
   if(cliente)return cliente;
   return'un formulario sin OT ni cliente';
 }
+/* Un borrador solo se ofrece retomar si es del mismo día calendario (hora
+   local) en que se guardó por última vez. Así, si quedó una OT a medias y
+   pasa la noche sin cerrarla, al otro día el sistema arranca limpio en vez
+   de seguir preguntando "¿retomar?" indefinidamente. */
+export function regDraftEsDeHoy(d){
+  if(!d||!d.savedAt)return false;
+  const guardado=new Date(d.savedAt), hoy=new Date();
+  return guardado.getFullYear()===hoy.getFullYear()&&guardado.getMonth()===hoy.getMonth()&&guardado.getDate()===hoy.getDate();
+}
 /* Se llama justo después de iniciar sesión (o al recargar/reabrir el
    sistema): si hay un borrador guardado de una OT que quedó sin terminar
    (por ejemplo, por un cierre inesperado, una actualización del sistema,
    o recargar la página sin querer), se muestra un aviso claro preguntando
    si se quiere retomar esa OT o empezar una nueva. No aparece solo por
-   cambiar de pestaña dentro del sistema — solo al reabrir/recargar. */
+   cambiar de pestaña dentro del sistema — solo al reabrir/recargar.
+   Si el borrador es de un día anterior, se descarta solo, sin preguntar. */
 export function restoreRegDraft(){
   let draft=null;
   try{draft=JSON.parse(localStorage.getItem(regDraftKey())||'null');}catch(e){}
   if(!draft||regDraftIsEmpty(draft))return;
+  if(!regDraftEsDeHoy(draft)){clearRegDraft();return;}
   pendingRegDraft=draft;
   abrirModalOtPendiente(draft);
 }
@@ -614,11 +656,14 @@ export function cerrarModalOtPendiente(){
   const modal=g('modal-ot-pendiente');
   if(modal)modal.style.display='none';
 }
-/* Botón "Retomar" del modal: repone el borrador guardado en el formulario. */
-export function retomarOtPendiente(){
+/* Botón "Retomar" del modal: repone el borrador guardado en el formulario,
+   incluidas las fotos/PDF que se habían elegido (ver
+   restoreRegAdjuntosPendientesFromDb). */
+export async function retomarOtPendiente(){
   if(pendingRegDraft)applyRegDraftToForm(pendingRegDraft);
   pendingRegDraft=null;
   cerrarModalOtPendiente();
+  await restoreRegAdjuntosPendientesFromDb();
 }
 /* Botón "Nueva OT" del modal: descarta el borrador pendiente y deja el
    formulario en blanco. */

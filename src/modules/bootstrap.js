@@ -1,5 +1,5 @@
 import { applyTheme } from './color-sistema.js';
-import { DEFAULT_LISTS, __set_customLists, __set_lists, __set_personas, __set_registros, __set_themeColor, __set_unidades, __set_vehiculoData, customLists, lists, personas, registros, themeColor, unidades, vehiculoData } from './core-data.js';
+import { DEFAULT_LISTS, __set_customLists, __set_lists, __set_personas, __set_registros, __set_rutas, __set_themeColor, __set_unidades, __set_vehiculoData, customLists, lists, personas, registros, themeColor, unidades, vehiculoData } from './core-data.js';
 import { __set_evaluacionesFotos, __set_evaluacionesNuevo, loadEvalFotosOT } from './evaluaciones.js';
 import { initRgValsDefaults, populateForms } from './form-helpers.js';
 import { pinInputs, tocarActividadSesion, tryRestoreSession } from './login.js';
@@ -8,8 +8,8 @@ import { guardar } from './registro-adjuntos.js';
 
 /* ===== STORAGE ===== */
 export const GOOGLE_REVIEW_LINK='https://share.google/hmXEUG6OXGw9U6JjE';
-export const SUPABASE_URL='https://dcbsdwqkmeepxuvaykxb.supabase.co';
-export const SUPABASE_KEY='sb_publishable_Aq1EklkdGz81FdUDtJEsUw_k8PeTXNk';
+export const SUPABASE_URL=import.meta.env.VITE_SUPABASE_URL;
+export const SUPABASE_KEY=import.meta.env.VITE_SUPABASE_ANON_KEY;
 export let sb=null;
 try{
   if(window.supabase&&window.supabase.createClient){
@@ -75,7 +75,7 @@ export function dbError(ctx,e){
   alert('No se pudo guardar en la base de datos ('+ctx+').\n\nDetalle: '+detalle+'\n\nRevisa tu conexión e inténtalo de nuevo.');
 }
 export function rowRegistro(r){return{
-  id:r.id,fecha:r.fecha||null,mes:r.mes,tipo:r.tipo,ot:r.ot,cliente:r.cliente,
+  id:r.id,fecha:r.fecha||null,mes:r.mes,tipo:r.tipo,categoria_venta:r.categoriaVenta||'A',ot:r.ot,cliente:r.cliente,
   tec1:r.tec1,tec2:r.tec2,tec3:r.tec3,tec4:r.tec4,tecnicos_extra:r.tecnicosExtra||[],
   hinicio:r.hinicio,hsalida:r.hsalida,dur_min:r.durMin,
   traslado:r.traslado,tipo_cortina:r.tipoCortina,cantidad:r.cantidad,productos:r.productos||[],
@@ -98,10 +98,11 @@ export async function dbUpsertRegistro(r){
          migración SQL que agrega el toggle "Foto y Video"), no se pierde el
          resto del registro: se reintenta sin ese campo. */
       const msg=(error.message||'').toLowerCase();
-      if(msg.includes('foto_video')){
-        console.warn('Falta la columna "foto_video" en rolzzo_registros (ver ALTER TABLE pendiente) — se guardó el resto del registro sin ese dato.');
+      if(msg.includes('foto_video')||msg.includes('categoria_venta')){
+        const col=msg.includes('categoria_venta')?'categoria_venta':'foto_video';
+        console.warn(`Falta la columna "${col}" en rolzzo_registros (ver ALTER TABLE pendiente) — se guardó el resto del registro sin ese dato.`);
         const fallback=rowRegistro(r);
-        delete fallback.foto_video;
+        delete fallback[col];
         const r2=await sb.from('rolzzo_registros').upsert([fallback]);
         if(r2.error)throw r2.error;
         return true;
@@ -149,6 +150,22 @@ export async function dbDeleteUnidad(id){
   if(!sbReady())return;
   try{const{error}=await sb.from('rolzzo_unidades').delete().eq('id',id);if(error)throw error;}
   catch(e){dbError('eliminar unidad',e);}
+}
+export function rowRuta(r){return{
+  id:r.id,fecha:r.fecha||null,origen_direccion:r.origenDireccion||null,
+  origen_lat:r.origenLat??null,origen_lon:r.origenLon??null,
+  cantidad_equipos:r.cantidadEquipos||null,equipos:r.equipos||[],
+  creado_por:r.creadoPor||null
+};}
+export async function dbUpsertRuta(r){
+  if(!sbReady())return false;
+  try{const{error}=await sb.from('rolzzo_rutas').upsert([rowRuta(r)]);if(error)throw error;return true;}
+  catch(e){dbError('ruta',e);return false;}
+}
+export async function dbDeleteRuta(id){
+  if(!sbReady())return;
+  try{const{error}=await sb.from('rolzzo_rutas').delete().eq('id',id);if(error)throw error;}
+  catch(e){dbError('eliminar ruta',e);}
 }
 export function rowEvalFoto(e){return{
   id:String(e.id),ot:e.ot,persona:e.persona,fecha:e.fecha||null,mes:e.mes,nivel:e.nivel
@@ -268,7 +285,7 @@ export async function saveAll(){
       r=await sb.from('rolzzo_personas').insert(personas.map(p=>({
         codigo:p.codigo,nombre:p.nombre,rut:p.rut||null,rol:p.rol,
         es_nuevo:!!p.esNuevo,dias_prueba:p.diasPrueba||null,fecha_ingreso:p.fechaIngreso||null,
-        permisos:p.permisos||['regnew','regrep','dash','unireg','unimant','unirep'],induccion:p.induccion||{}
+        permisos:p.permisos||['regnew','regrep','dash','rutas','unireg','unimant','unirep'],induccion:p.induccion||{}
       })));
       if(r.error)throw r.error;
     }
@@ -310,7 +327,7 @@ export async function loadPersonas(){
       __set_personas(data.map(p=>({
         nombre:p.nombre,rut:p.rut||'',codigo:p.codigo,rol:p.rol,
         esNuevo:p.es_nuevo,diasPrueba:p.dias_prueba,fechaIngreso:p.fecha_ingreso,
-        permisos:p.permisos||['regnew','regrep','dash','unireg','unimant','unirep'],induccion:p.induccion||{}
+        permisos:p.permisos||['regnew','regrep','dash','rutas','unireg','unimant','unirep'],induccion:p.induccion||{}
       })));
     }
   }catch(e){console.error('Error cargando personas:',e);}
@@ -319,7 +336,7 @@ export async function loadAll(){
   try{
     const{data}=await sb.from('rolzzo_registros').select('*');
     if(data)__set_registros(data.map(r=>({
-      id:r.id,fecha:r.fecha,mes:r.mes,tipo:r.tipo,ot:r.ot,cliente:r.cliente,
+      id:r.id,fecha:r.fecha,mes:r.mes,tipo:r.tipo,categoriaVenta:r.categoria_venta||'A',ot:r.ot,cliente:r.cliente,
       tec1:r.tec1,tec2:r.tec2,tec3:r.tec3,tec4:r.tec4,tecnicosExtra:r.tecnicos_extra||[],
       hinicio:r.hinicio,hsalida:r.hsalida,durMin:r.dur_min,
       traslado:r.traslado,tipoCortina:r.tipo_cortina,cantidad:r.cantidad,productos:r.productos||[],
@@ -391,6 +408,14 @@ export async function loadAll(){
     const{data}=await sb.from('rolzzo_config').select('*').eq('clave','theme_color').maybeSingle();
     if(data&&data.valor)__set_themeColor(data.valor);
   }catch(e){console.error('Error cargando config:',e);}
+
+  try{
+    const{data}=await sb.from('rolzzo_rutas').select('*').order('creado_en',{ascending:false}).limit(30);
+    if(data)__set_rutas(data.map(r=>({
+      id:r.id,fecha:r.fecha,origenDireccion:r.origen_direccion,origenLat:r.origen_lat,origenLon:r.origen_lon,
+      cantidadEquipos:r.cantidad_equipos,equipos:r.equipos||[],creadoPor:r.creado_por,creadoEn:r.creado_en
+    })));
+  }catch(e){console.error('Error cargando rutas:',e);}
 }
 
 document.addEventListener('input',function(e){

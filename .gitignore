@@ -1,2 +1,6 @@
 node_modules
 dist
+dist-cpanel.zip
+.env
+.env.local
+.env.*.local

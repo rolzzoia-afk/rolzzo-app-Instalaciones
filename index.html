@@ -104,6 +104,7 @@
     <div class="card" style="--sec-color:#2a78d6">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
         <p class="card-title" style="margin:0;padding:0;border:none"><i class="ti ti-clipboard-list" aria-hidden="true"></i>Nueva visita</p>
+        <button type="button" id="btn-cat-venta" class="cat-venta-btn" title="Categoría de venta" onclick="toggleCategoriaVenta()">A</button>
       </div>
       <div id="reg-editing-banner" style="display:none;background:#fff3cd;color:#7a5b00;border-radius:8px;padding:.6rem .9rem;margin:.7rem 0;font-size:12.5px;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
         <span><i class="ti ti-pencil" aria-hidden="true"></i> Editando la OT <b id="reg-editing-ot">—</b> ya guardada — al guardar se actualiza esta misma visita, no se crea una nueva.</span>
@@ -413,6 +414,61 @@
       </div>
     </div>
 
+    <!-- GARANTÍAS: Informe de Garantía/Instalación -->
+    <div class="pane" id="pane-reg_garantia">
+      <div class="finst-block">
+        <p class="finst-block-title"><span class="fb-num">1</span>Datos del cliente y la OT</p>
+        <div class="fg">
+          <div class="field"><label>Cliente <span class="req-asterisk">*</span></label><input type="text" id="gar-cliente" placeholder="Nombre del cliente"></div>
+          <div class="field"><label>Teléfono</label><input type="tel" id="gar-telefono" placeholder="Ej: +56912345678"></div>
+          <div class="field"><label>Comuna</label><input type="text" id="gar-comuna" placeholder="Comuna"></div>
+          <div class="field"><label>N° OT <span class="req-asterisk">*</span></label><input type="text" id="gar-ot" placeholder="Ej: 1900"></div>
+          <div class="field"><label>Quien recibe</label><input type="text" id="gar-quien-recibe" placeholder="Nombre de quien recibe"></div>
+          <div class="field"><label>Mail</label><input type="email" id="gar-mail" placeholder="cliente@correo.com"></div>
+          <div class="field"><label>Fecha <span class="req-asterisk">*</span></label><input type="date" id="gar-fecha"></div>
+        </div>
+      </div>
+
+      <div class="finst-block">
+        <p class="finst-block-title"><span class="fb-num">2</span>Tipo de garantía o instalación</p>
+        <div class="finst-prod-grid" id="gar-productos-grid"></div>
+        <div class="field f1" style="margin-top:.9rem"><label>Especifique</label><input type="text" id="gar-especifique" placeholder="Detalle adicional del tipo de garantía/instalación"></div>
+      </div>
+
+      <div class="finst-block">
+        <p class="finst-block-title"><span class="fb-num">3</span>Resumen de garantía o instalación</p>
+        <table class="finst-check-tbl" id="gar-resumen-tbl"></table>
+      </div>
+
+      <div class="finst-block">
+        <p class="finst-block-title"><span class="fb-num">4</span>Comentario adicional</p>
+        <div class="field f1"><textarea id="gar-comentario" placeholder="Comentario adicional sobre la garantía o instalación..."></textarea></div>
+      </div>
+
+      <div class="finst-block">
+        <p class="finst-block-title"><span class="fb-num">5</span>Confirmación cliente</p>
+        <p style="font-size:11px;color:var(--text-muted);line-height:1.5;background:var(--surface-1,#f5f4f0);border-radius:8px;padding:.8rem 1rem;margin-bottom:1rem">
+          Con esta firma el cliente certifica que se cubrió la garantía o instalaciones correctamente.
+        </p>
+        <div class="fg">
+          <div class="field f1">
+            <div class="finst-signature-wrap"><canvas id="gar-firma-cliente" height="160"></canvas></div>
+            <div class="finst-sig-label">Firma cliente</div>
+            <div class="finst-sig-actions"><button class="btn-sec" onclick="finstLimpiarFirma('gar-firma-cliente')"><i class="ti ti-eraser" aria-hidden="true"></i>Limpiar firma</button></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="finst-final-actions">
+        <button class="btn" id="gar-generar-btn" onclick="garGenerarYGuardarPDF()"><i class="ti ti-file-type-pdf" aria-hidden="true"></i>Finalizar, firmar y generar PDF</button>
+        <button class="btn-sec" onclick="garBlankForm()" title="Empezar en blanco"><i class="ti ti-file" aria-hidden="true"></i>En blanco</button>
+      </div>
+      <div id="gar-post-pdf" class="finst-ot-found" style="display:none;background:#eaf3ff;border-color:#2a78d6;margin-top:1rem">
+        <i class="ti ti-circle-check" aria-hidden="true" style="color:#2a78d6"></i>
+        <span>Informe de garantía firmado, descargado y guardado en la OT.</span>
+      </div>
+    </div>
+
     <!-- DASHBOARD -->
     <div class="pane" id="pane-dash">
       <div class="filters" id="dash-filters">
@@ -426,6 +482,66 @@
         <button class="dl-btn" onclick="exportDashTodoPDF()"><i class="ti ti-download" aria-hidden="true"></i>Descargar todo (PDF)</button>
       </div>
       <div id="dash-body"></div>
+    </div>
+
+    <!-- RUTAS -->
+    <div class="pane" id="pane-rutas">
+      <div class="toast" id="toast-rutas" style="display:none"><i class="ti ti-circle-check" aria-hidden="true"></i>Ruta guardada.</div>
+
+      <div class="card ruta-origen-card">
+        <div class="ruta-origen-row">
+          <span class="ruta-origen-tag"><i class="ti ti-building" aria-hidden="true"></i>Origen (bodega)</span>
+          <input type="text" id="rutas-origen" placeholder="Dirección de la bodega" aria-label="Dirección de salida" onchange="setRutaOrigen(this.value)">
+        </div>
+      </div>
+
+      <div class="ruta-input-grid">
+        <div class="card" style="--sec-color:#0B7285">
+          <p class="card-title"><i class="ti ti-users" aria-hidden="true"></i>Equipos</p>
+          <div class="fg">
+            <div class="field" style="max-width:160px">
+              <label>Cantidad de equipos</label>
+              <input type="number" id="rutas-equipos" min="1" value="2" onchange="setEquiposCount(this.value)">
+            </div>
+          </div>
+          <p class="field-hint" style="margin:.6rem 0 .9rem">Elige un color de equipo y toca a los operadores que lo integran:</p>
+          <div id="rutas-grupos" class="ruta-grupos-grid"></div>
+          <div id="rutas-operadores" class="ruta-operadores" style="margin-top:1rem"></div>
+        </div>
+        <div class="card" style="--sec-color:#0B7285">
+          <p class="card-title"><i class="ti ti-map-pin" aria-hidden="true"></i>Direcciones a visitar</p>
+          <div class="ruta-dir-add">
+            <input type="text" id="rutas-dir-input" placeholder="Ej: Av. Providencia 1234, Providencia" onkeydown="if(event.key==='Enter'){event.preventDefault();addDireccionRuta();}">
+            <button type="button" class="btn-sec" onclick="addDireccionRuta()"><i class="ti ti-plus" aria-hidden="true"></i> Agregar</button>
+          </div>
+          <div id="rutas-dir-list" class="ruta-dir-list"></div>
+        </div>
+      </div>
+
+      <div class="ruta-hero-wrap">
+        <button type="button" class="ruta-hero-btn" id="rutas-calc-btn" onclick="calcularRutas()"><i class="ti ti-route" aria-hidden="true"></i> Calcular ruta</button>
+        <p class="ruta-hero-hint">Arma las direcciones arriba y los operadores de cada equipo; acá abajo aparece el mapa y el reparto óptimo por equipo.</p>
+      </div>
+
+      <div id="rutas-resultado-wrap" style="display:none">
+        <div class="card" style="--sec-color:#0B7285">
+          <div class="ruta-resultado-head">
+            <p class="card-title" style="margin-bottom:0;border-bottom:none;padding-bottom:0"><i class="ti ti-map-pin" aria-hidden="true"></i>Resultado</p>
+            <div class="ruta-toolbar">
+              <button type="button" class="btn-sec btn-sm" id="rutas-pdf-btn" onclick="exportRutaActualPDF()"><i class="ti ti-file-type-pdf" aria-hidden="true"></i> PDF</button>
+              <button type="button" class="btn-sec btn-sm" style="color:#1baf7a;border-color:#1baf7a" onclick="enviarRutaWhatsapp()"><i class="ti ti-brand-whatsapp" aria-hidden="true"></i> WhatsApp</button>
+              <button type="button" class="btn-sec btn-sm" style="color:#0B7285;border-color:#0B7285" onclick="guardarRutaActual()"><i class="ti ti-device-floppy" aria-hidden="true"></i> Guardar</button>
+            </div>
+          </div>
+          <div id="rutas-mapa-wrap" class="ruta-mapa-wrap" style="display:none"></div>
+        </div>
+      </div>
+
+      <div class="card" style="--sec-color:#0B7285;margin-top:1.2rem">
+        <p class="card-title"><i class="ti ti-clock" aria-hidden="true"></i>Historial de rutas</p>
+        <div id="rutas-historial"></div>
+        <div id="rutas-hist-detalle"></div>
+      </div>
     </div>
 
     <!-- UNIDAD -->
