@@ -7,7 +7,7 @@ import { ensureVehData } from './mantenciones-vehiculos.js';
 import { guardar } from './registro-adjuntos.js';
 
 /* ===== STORAGE ===== */
-export const GOOGLE_REVIEW_LINK='https://share.google/hmXEUG6OXGw9U6JjE';
+export const GOOGLE_REVIEW_LINK='https://g.co/kgs/HuwmM4';
 export const SUPABASE_URL=import.meta.env.VITE_SUPABASE_URL;
 export const SUPABASE_KEY=import.meta.env.VITE_SUPABASE_ANON_KEY;
 export let sb=null;
